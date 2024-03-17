@@ -1,93 +1,148 @@
-// This is an example program showing the usage of hellabot
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-co-op/gocron/v2"
 	hbot "github.com/whyrusleeping/hellabot"
-	log "gopkg.in/inconshreveable/log15.v2"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	logi "gopkg.in/inconshreveable/log15.v2"
 )
 
-var serv = flag.String("server", "irc.p2p-network.net:6668", "hostname and port for irc server to connect to")
-var nick = flag.String("nick", "vincejvvv", "nickname for the bot")
+var serv = os.Getenv("IRC_SERVER")
+var nick = os.Getenv("BOT_NICK")
+var ircChannel = os.Getenv("IRC_CHANNEL")
+var ircPassword = os.Getenv("IRC_BOT_PASSWORD")
+var ircDomainTrigger = os.Getenv("IRC_DOMAIN_TRIGGER") // Trigger for hello message and nickserv auth
+var mongoConnectionStr = os.Getenv("MONGODB_CONN_STRING")
+var dbName = os.Getenv("DB_NAME")
+var crawlerCookie = os.Getenv("CRAWLER_COOKIE")
+var fetchSec = os.Getenv("FETCH_SEC")
+
+type Announce struct {
+	TorrentId   int
+	Name        string
+	Size        string
+	CreatedDate time.Time
+	Category    string
+	Type        string
+	Uploader    string
+	URL         string
+	RawLine     string
+}
 
 func main() {
 	flag.Parse()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoConnectionStr))
+	if err != nil {
+		log.Println("Error mongo connection")
+	}
+	mongoColl := mongoClient.Database(dbName).Collection("announces")
+	//var result bson.M
+	//mongoColl.FindOne(context.TODO(), bson.D{{"title", "test"}}).Decode(&result)
+
 	hijackSession := func(bot *hbot.Bot) {
-		bot.HijackSession = true
+		bot.SSL = true
+		bot.SASL = true
+		bot.Password = ircPassword
 	}
 	channels := func(bot *hbot.Bot) {
-		bot.Channels = []string{"#fnp-announce"}
+		bot.Channels = []string{ircChannel}
 	}
-	irc, err := hbot.NewBot(*serv, *nick, hijackSession, channels)
+	irc, err := hbot.NewBot(serv, nick, hijackSession, channels)
 	if err != nil {
 		panic(err)
 	}
 
+	irc.AddTrigger(nickServAuth)
 	irc.AddTrigger(sayJoinMsg)
-	//irc.AddTrigger(longTrigger)
-	irc.Logger.SetHandler(log.StdoutHandler)
-	// logHandler := log.LvlFilterHandler(log.LvlInfo, log.StdoutHandler)
-	// or
-	// irc.Logger.SetHandler(logHandler)
-	// or
-	// irc.Logger.SetHandler(log.StreamHandler(os.Stdout, log.JsonFormat()))
 
-	// Start up bot (this blocks until we disconnect)
-	// go irc.Run()
+	irc.Logger.SetHandler(logi.StdoutHandler)
 
 	// create a scheduler
 	s, err := gocron.NewScheduler()
 	if err != nil {
 		// handle error
-		fmt.Sprintln("Error in scheduler: %s", err.Error())
+		log.Printf("Error in scheduler: %s\n", err.Error())
 	}
+
+	fetchSecNum, _ := strconv.Atoi(fetchSec)
 
 	// add a job to the scheduler
 	j, err := s.NewJob(
 		gocron.DurationJob(
-			10*time.Second,
+			time.Duration(fetchSecNum)*time.Second,
 		),
 		gocron.NewTask(
 			func(a string, b int) {
 				// Request the HTML page.
-				fmt.Println("Fetching FnP page")
+				log.Println("Fetching FnP page")
 				client := &http.Client{}
 				req, err := http.NewRequest("GET", "https://fearnopeer.com/torrents?perPage=50", nil)
-				req.Header.Set("Cookie", "remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d=eyJpdiI6InlNalFxdXJnL3pwM013cy9KSnZUZVE9PSIsInZhbHVlIjoiemtGUVA5TVlGbStrUjYwUmJHM0ttV3FnNUozaFlEQjFNMm1PWlRrMXdIL1pZT3A2QXZLVzljd2dOaGZNOEdyc0F1UGdXOVdOVVhPblpRaEhkTmJHamNMbE54dk9XVjAxaGhYOGM5enlXRm11aDYrMFFKem9IejJUR0dKQmVyaVJDQm1NcFAzT1pFbW1mektreE1oOEhOc0RscUwyTUxqcnRPZ0lLK2VnRXArL0ZXTFdrMWkrYnBGdElNeU0wYzlCYTNydFJYZDlON2NPMjAvbTQ0b29tU1R2SGo4dlhvdllISlNNWlB4WWI3cz0iLCJtYWMiOiI1ODMxN2VmZTQzZDdlOTBhNTMzMTA1MTJiODkxMjU0NTM2MmJiYjA2MDFmYjMxZTIyNjhhMzYzMzQzZjExMTBlIiwidGFnIjoiIn0%3D; XSRF-TOKEN=eyJpdiI6ImpOazBRa2poMnN4eTFXbEtvUFB1U2c9PSIsInZhbHVlIjoiUE5rNm1ORXNWU1E1K0YzajZLNW83b0VJNDhoekowWXFUaXp0T2dTWFQyRW9SMWQwMlg2SHViSHk4THpZTkMrRXY2YWVxOWI2dGl2NWVpaXpOT01QU3h3c3hQKzVMdmZjMUowTlBiV3l2UmpFR082c2FmTjZ0NXIvdnBHMmt4OXgiLCJtYWMiOiI1YmQxOGUyY2Y5Zjk5MzM3NWY1MzRkZTg4OTlmN2Y1N2U1ZDNiMWI5YzAwNmJmYTljNGU3OWYzYWMwMjY0ZDU4IiwidGFnIjoiIn0%3D; laravel_session=eyJpdiI6InBzNlI2TFZRVm9mcjJhb2xiam9vRFE9PSIsInZhbHVlIjoiRklXRjZGdWlob1VNWkZUKzAzSlBhQWNmb3dVdHZBZ3cxRjZTSDFRc0o5bjM4ZHlqdDVIU05hM25SbDM1NFhhcG1uaHA4VXNzNUZzSkQwWXVQbHgwc0tuajRVVXhSbnBZb2ZTanYyNm5TWVpFS3dhK2hEWVBlWTFJY3dJT0JkcU0iLCJtYWMiOiJmODYxZmU1NWI3ODAxZGY1Y2JlODI3NGRmMjJhMzBjZmE0OTIzNmE2NjJjMGFhOGZmNGM2MmE0NjZjOWI3ZDE5IiwidGFnIjoiIn0%3D; io=uhkjkJCKCekuyz48AABu")
+				req.Header.Set("Cookie", crawlerCookie)
 				req.Header.Set("User-Agent", "Golang_IRC_Crawler_Bot/1.0")
 				if err != nil {
-					fmt.Println(err)
+					log.Println(err)
 				}
 				res, err := client.Do(req)
 				if err != nil {
-					fmt.Println(err)
+					log.Println(err)
 				}
 				defer res.Body.Close()
 				if res.StatusCode != 200 {
 					//log.Fatalf("status code error: %d %s", res.StatusCode, res.Status)
-					fmt.Sprintln("Http error: %d", res.StatusCode)
+					log.Printf("Http error: %d\n", res.StatusCode)
 				}
 
 				// Load the HTML document
 				doc, err := goquery.NewDocumentFromReader(res.Body)
 				if err != nil {
-					fmt.Sprintln("Error in scheduler: %s", err.Error())
+					log.Printf("Error in scheduler: %s", err.Error())
 				}
 
 				// Find the review items
 				doc.Find("body > main > article > div > section.panelV2.torrent-search__results > div > table > tbody > tr").Each(func(i int, s *goquery.Selection) {
 					// For each item found, get the title
-					title := s.Find(".torrent-search--list__name").Text()
-					title = strings.TrimSpace(title)
-					fmt.Printf("%s\n", title)
+					torrentIdStr, _ := s.Attr("data-torrent-id")
+					torrentId, _ := strconv.Atoi(torrentIdStr)
+					categoryIdStr, _ := s.Attr("data-category-id")
+					categoryId, _ := strconv.Atoi(categoryIdStr)
+					typeIdStr, _ := s.Attr("data-type-id")
+					typeId, _ := strconv.Atoi(typeIdStr)
+					url := fmt.Sprintf("https://fearnopeer.com/torrents/%d", torrentId)
+					title := strings.TrimSpace(s.Find("a.torrent-search--list__name").Text())
+					uploader := strings.TrimSpace(s.Find("a.user-tag__link").Text())
+					if strings.Contains(uploader, "(Anonymous)") {
+						// remove parenthesis for anonymous uploader
+						uploader = "Anonymous"
+					}
+
+					size := strings.TrimSpace(s.Find("td.torrent-search--list__size").Text())
+					announceLine := fmt.Sprintf("Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]", getCategoryFriendlyStr(categoryId), getTypeFriendlyStr(typeId), title, size, uploader, url)
+					announceDoc := Announce{TorrentId: torrentId, Name: title, Size: size, Category: getCategoryFriendlyStr(categoryId),
+						Type: getTypeFriendlyStr(typeId), Uploader: uploader, URL: url, RawLine: announceLine, CreatedDate: time.Now()}
+
+					_, err := mongoColl.InsertOne(context.TODO(), announceDoc)
+					if err == nil {
+						// announce to DB as not yet inserted in database
+						log.Println(announceLine + "\n")
+						irc.Msg(ircChannel, announceLine)
+						//fmt.Printf("Inserted document with _id: %v\n", res.InsertedID)
+					}
+
 				})
 			},
 			"hello",
@@ -95,26 +150,97 @@ func main() {
 		),
 	)
 	if err != nil {
-		fmt.Println("Error in job: " + err.Error())
+		log.Println("Error in job: " + err.Error())
 	}
 	// each job has a unique id
-	fmt.Println(j.ID())
+	log.Println("Cron Job id:" + j.ID().String())
 
 	// start the scheduler
 	go s.Start()
 
-	fmt.Println("Press CTRL+C to exit")
-	select {} // block forever
+	log.Println("Press CTRL+C to exit")
+
+	// Start up bot (this blocks until we disconnect)
+	irc.Run()
+	//select {} // block forever
+}
+
+func getCategoryFriendlyStr(catId int) string {
+	switch catId {
+	case 1:
+		return "Movies"
+	case 2:
+		return "TV"
+	case 3:
+		return "Music"
+	case 4:
+		return "Anime"
+	case 5:
+		return "Games"
+	case 6:
+		return "Apps"
+	case 7:
+		return "Sport"
+	case 8:
+		return "Assorted"
+	default:
+		return "Unknown"
+	}
+}
+
+func getTypeFriendlyStr(typeId int) string {
+	switch typeId {
+	case 1:
+		return "Full Disc"
+	case 2:
+		return "Remux"
+	case 3:
+		return "Encode"
+	case 4:
+		return "WEB-DL"
+	case 5:
+		return "WEBRip"
+	case 6:
+		return "HDTV"
+	case 7:
+		return "FLAC"
+	case 11:
+		return "MP3"
+	case 12:
+		return "Mac"
+	case 13:
+		return "Windows"
+	case 17:
+		return "PlayStation"
+	case 14:
+		return "AudioBooks"
+	case 15:
+		return "Books"
+	default:
+		return "Misc"
+	}
 }
 
 // This trigger replies Hello when you say hello
 var sayJoinMsg = hbot.Trigger{
 	Condition: func(bot *hbot.Bot, m *hbot.Message) bool {
-		return strings.Contains(m.Raw, "#fnp-announce :End of /NAMES list.") && strings.Contains(m.From, ".p2p-network.net")
+		return strings.Contains(m.Raw, ircChannel+" :End of /NAMES list.") && strings.Contains(m.From, ircDomainTrigger)
 		//return m.Command == "PRIVMSG" && m.Content == "-info"
 	},
 	Action: func(irc *hbot.Bot, m *hbot.Message) bool {
-		irc.Msg("#FnP-Announce", "Hello #FnP-Announce!! Will start announcing soon...")
+		irc.Msg(ircChannel, fmt.Sprintf("Hello %s!! Will start announcing soon...", ircChannel))
+		return false
+	},
+}
+
+// This trigger replies Hello when you say hello
+var nickServAuth = hbot.Trigger{
+	Condition: func(bot *hbot.Bot, m *hbot.Message) bool {
+		return strings.Contains(m.Raw, " :End of message of the day.") && strings.Contains(m.From, ircDomainTrigger)
+		//return m.Command == "PRIVMSG" && m.Content == "-info"
+	},
+	Action: func(irc *hbot.Bot, m *hbot.Message) bool {
+		irc.Msg("NickServ", "identify "+ircPassword)
 		return false
 	},
 }
