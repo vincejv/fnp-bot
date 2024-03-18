@@ -23,7 +23,8 @@ var serv = os.Getenv("IRC_SERVER")
 var nick = os.Getenv("BOT_NICK")
 var ircChannel = os.Getenv("IRC_CHANNEL")
 var ircPassword = os.Getenv("IRC_BOT_PASSWORD")
-var ircDomainTrigger = os.Getenv("IRC_DOMAIN_TRIGGER") // Trigger for hello message and nickserv auth
+
+// var ircDomainTrigger = os.Getenv("IRC_DOMAIN_TRIGGER") // Trigger for hello message and nickserv auth
 var mongoConnectionStr = os.Getenv("MONGODB_CONN_STRING")
 var dbName = os.Getenv("DB_NAME")
 var crawlerCookie = os.Getenv("CRAWLER_COOKIE")
@@ -87,7 +88,7 @@ func main() {
 		gocron.NewTask(
 			func(a string, b int) {
 				// Request the HTML page.
-				log.Println("Fetching FnP page")
+				//log.Println("Fetching FnP page")
 				client := &http.Client{}
 				req, err := http.NewRequest("GET", "https://fearnopeer.com/torrents?perPage=50", nil)
 				req.Header.Set("Cookie", crawlerCookie)
