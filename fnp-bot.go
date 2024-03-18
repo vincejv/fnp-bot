@@ -71,7 +71,7 @@ func main() {
 	_, err = db.Exec(`INSERT INTO announce(id, name, value) VALUES(?, 'lastTorrentId', ?)`, LAST_ANNOUNCE_SETTING_ID, initLastTorrentId)
 	if err != nil {
 		log.Println(err)
-		log.Println("Existing `lastTorrentId` is set, ignoring `LAST_TORRENT_ID` setting, it's only used for initialization of DB")
+		log.Println("Existing `lastTorrentId` is set, ignoring `INIT_TORRENT_ID` setting, it's only used for initialization of DB")
 	}
 	// Prepare SQLite Database -- END
 
