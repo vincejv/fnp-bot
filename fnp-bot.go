@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -162,6 +163,11 @@ func main() {
 				// refresh announce setting from DB
 				announceSetting := getSetting(db, LAST_ANNOUNCE_SETTING_ID)
 				lastTorrentId := announceSetting.value
+
+				// Must sort in ascending so next block will work correctly
+				sort.Slice(fetchedTors, func(tori, torj int) bool {
+					return fetchedTors[tori].TorrentId < fetchedTors[torj].TorrentId
+				})
 
 				// Examine fetched torrents
 				for _, tor := range fetchedTors {
