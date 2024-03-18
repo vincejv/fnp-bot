@@ -52,7 +52,150 @@ type Setting struct {
 func main() {
 	flag.Parse()
 
-	// Prepare SQLite Database -- START
+	// Prepare SQLite Database
+	db := openDb()
+
+	// Prepare IRC Bot
+	irc := createIRCBot()
+	//irc.AddTrigger(nickServAuth)
+
+	// create a scheduler
+	scheduler := createScheduler()
+
+	// add a job to the scheduler
+	// each job has a unique id
+	fetchSecNum, _ := strconv.Atoi(fetchSec)
+	scheduleFetchJob(scheduler, fetchSecNum, db, irc)
+
+	// start the scheduler routine
+	go scheduler.Start()
+	log.Println("Press CTRL+C to exit")
+
+	// Start up bot (this blocks until we disconnect)
+	irc.Run()
+	//select {} // block forever
+}
+
+func createIRCBot() *hbot.Bot {
+	botConfig := func(bot *hbot.Bot) {
+		bot.SSL = true
+		bot.Password = ircPassword // SASL (if enabled) or ZNC password
+	}
+	channels := func(bot *hbot.Bot) {
+		bot.Channels = []string{ircChannel}
+	}
+
+	irc, err := hbot.NewBot(serv, nick, botConfig, channels)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// IRC trace and logging
+	irc.Logger.SetHandler(logi.StdoutHandler)
+	return irc
+}
+
+func createScheduler() gocron.Scheduler {
+	scheduler, err := gocron.NewScheduler()
+	if err != nil {
+		// handle error
+		log.Printf("Error while creating scheduler: %s\n", err.Error())
+	}
+	return scheduler
+}
+
+func scheduleFetchJob(scheduler gocron.Scheduler, fetchSecNum int, db *sql.DB, irc *hbot.Bot) {
+	j, err := scheduler.NewJob(
+		gocron.DurationJob(
+			time.Duration(fetchSecNum)*time.Second,
+		),
+		gocron.NewTask(
+			func(a string, b int) {
+				// Request the HTML page.
+				client := &http.Client{}
+				req, err := http.NewRequest("GET", "https://fearnopeer.com/torrents?perPage=50", nil)
+				req.Header.Set("Cookie", crawlerCookie)
+				req.Header.Set("User-Agent", "Golang_IRC_Crawler_Bot/1.0")
+				if err != nil {
+					log.Println(err)
+				}
+				res, err := client.Do(req)
+				if err != nil {
+					log.Println(err)
+				}
+				defer res.Body.Close()
+				if res.StatusCode != 200 {
+					log.Printf("Http error: %d\n", res.StatusCode)
+				}
+
+				// Load the HTML document
+				doc, err := goquery.NewDocumentFromReader(res.Body)
+				if err != nil {
+					log.Printf("Error in scheduler: %s", err.Error())
+				}
+
+				var fetchedTors []Announce
+
+				// Scrape the items
+				doc.Find("body > main > article > div > section.panelV2.torrent-search__results > div > table > tbody > tr").Each(func(i int, s *goquery.Selection) {
+
+					torrentIdStr, _ := s.Attr("data-torrent-id")
+					torrentId, _ := strconv.Atoi(torrentIdStr)
+					categoryIdStr, _ := s.Attr("data-category-id")
+					categoryId, _ := strconv.Atoi(categoryIdStr)
+					typeIdStr, _ := s.Attr("data-type-id")
+					typeId, _ := strconv.Atoi(typeIdStr)
+					url := fmt.Sprintf("https://fearnopeer.com/torrents/%d", torrentId)
+					title := strings.TrimSpace(s.Find("a.torrent-search--list__name").Text())
+					uploader := strings.TrimSpace(s.Find("span.user-tag torrent-search--list__uploader").Text())
+
+					// remove parenthesis for anonymous uploader
+					if strings.Contains(uploader, "(Anonymous)") {
+						uploader = "Anonymous"
+					}
+
+					size := strings.TrimSpace(s.Find("td.torrent-search--list__size").Text())
+					announceLine := fmt.Sprintf("Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]", getCategoryFriendlyStr(categoryId), getTypeFriendlyStr(typeId), title, size, uploader, url)
+
+					// Store fetched torrents temporarily for processing
+					announceDoc := Announce{TorrentId: torrentId, Name: title, Size: size, Category: getCategoryFriendlyStr(categoryId),
+						Type: getTypeFriendlyStr(typeId), Uploader: uploader, URL: url, RawLine: announceLine, CreatedDate: time.Now()}
+					fetchedTors = append(fetchedTors, announceDoc)
+				})
+
+				// refresh and fetch announce setting from DB
+				announceSetting := getSetting(db, LAST_ANNOUNCE_SETTING_ID)
+				lastTorrentId := announceSetting.value
+
+				// Must sort in ascending so next block will work correctly
+				sort.Slice(fetchedTors, func(tori, torj int) bool {
+					return fetchedTors[tori].TorrentId < fetchedTors[torj].TorrentId
+				})
+
+				// Examine fetched torrents and push to IRC based on last send item id
+				for _, tor := range fetchedTors {
+					if tor.TorrentId > lastTorrentId {
+						log.Println(tor.RawLine)
+						irc.Msg(ircChannel, tor.RawLine)
+						lastTorrentId = tor.TorrentId
+					}
+				}
+
+				// save last announce setting to DB
+				updateSetting(db, LAST_ANNOUNCE_SETTING_ID, lastTorrentId)
+			},
+			"fetchJob",
+			1,
+		),
+	)
+	if err != nil {
+		log.Println("Error creating job: " + err.Error())
+	}
+
+	log.Println("Cron Job created with id:" + j.ID().String())
+}
+
+func openDb() *sql.DB {
 	db, err := sql.Open("sqlite3", "/config/announce.db")
 
 	if err != nil {
@@ -73,132 +216,7 @@ func main() {
 		log.Println(err)
 		log.Println("Existing `lastTorrentId` is set, ignoring `INIT_TORRENT_ID` setting, it's only used for initialization of DB")
 	}
-	// Prepare SQLite Database -- END
-
-	hijackSession := func(bot *hbot.Bot) {
-		bot.SSL = true
-		bot.Password = ircPassword // or ZNC password
-	}
-	channels := func(bot *hbot.Bot) {
-		bot.Channels = []string{ircChannel}
-	}
-	irc, err := hbot.NewBot(serv, nick, hijackSession, channels)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	//irc.AddTrigger(nickServAuth)
-
-	irc.Logger.SetHandler(logi.StdoutHandler)
-
-	// create a scheduler
-	s, err := gocron.NewScheduler()
-	if err != nil {
-		// handle error
-		log.Printf("Error in scheduler: %s\n", err.Error())
-	}
-
-	fetchSecNum, _ := strconv.Atoi(fetchSec)
-
-	// add a job to the scheduler
-	j, err := s.NewJob(
-		gocron.DurationJob(
-			time.Duration(fetchSecNum)*time.Second,
-		),
-		gocron.NewTask(
-			func(a string, b int) {
-				// Request the HTML page.
-				//log.Println("Fetching FnP page")
-				client := &http.Client{}
-				req, err := http.NewRequest("GET", "https://fearnopeer.com/torrents?perPage=50", nil)
-				req.Header.Set("Cookie", crawlerCookie)
-				req.Header.Set("User-Agent", "Golang_IRC_Crawler_Bot/1.0")
-				if err != nil {
-					log.Println(err)
-				}
-				res, err := client.Do(req)
-				if err != nil {
-					log.Println(err)
-				}
-				defer res.Body.Close()
-				if res.StatusCode != 200 {
-					//log.Fatalf("status code error: %d %s", res.StatusCode, res.Status)
-					log.Printf("Http error: %d\n", res.StatusCode)
-				}
-
-				// Load the HTML document
-				doc, err := goquery.NewDocumentFromReader(res.Body)
-				if err != nil {
-					log.Printf("Error in scheduler: %s", err.Error())
-				}
-
-				var fetchedTors []Announce
-
-				// Find the review items
-				doc.Find("body > main > article > div > section.panelV2.torrent-search__results > div > table > tbody > tr").Each(func(i int, s *goquery.Selection) {
-					// For each item found, get the title
-					torrentIdStr, _ := s.Attr("data-torrent-id")
-					torrentId, _ := strconv.Atoi(torrentIdStr)
-					categoryIdStr, _ := s.Attr("data-category-id")
-					categoryId, _ := strconv.Atoi(categoryIdStr)
-					typeIdStr, _ := s.Attr("data-type-id")
-					typeId, _ := strconv.Atoi(typeIdStr)
-					url := fmt.Sprintf("https://fearnopeer.com/torrents/%d", torrentId)
-					title := strings.TrimSpace(s.Find("a.torrent-search--list__name").Text())
-					uploader := strings.TrimSpace(s.Find("span.user-tag torrent-search--list__uploader").Text())
-					if strings.Contains(uploader, "(Anonymous)") {
-						// remove parenthesis for anonymous uploader
-						uploader = "Anonymous"
-					}
-
-					size := strings.TrimSpace(s.Find("td.torrent-search--list__size").Text())
-					announceLine := fmt.Sprintf("Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]", getCategoryFriendlyStr(categoryId), getTypeFriendlyStr(typeId), title, size, uploader, url)
-
-					// Store fetched torrents temporarily
-					announceDoc := Announce{TorrentId: torrentId, Name: title, Size: size, Category: getCategoryFriendlyStr(categoryId),
-						Type: getTypeFriendlyStr(typeId), Uploader: uploader, URL: url, RawLine: announceLine, CreatedDate: time.Now()}
-					fetchedTors = append(fetchedTors, announceDoc)
-				})
-
-				// refresh announce setting from DB
-				announceSetting := getSetting(db, LAST_ANNOUNCE_SETTING_ID)
-				lastTorrentId := announceSetting.value
-
-				// Must sort in ascending so next block will work correctly
-				sort.Slice(fetchedTors, func(tori, torj int) bool {
-					return fetchedTors[tori].TorrentId < fetchedTors[torj].TorrentId
-				})
-
-				// Examine fetched torrents
-				for _, tor := range fetchedTors {
-					if tor.TorrentId > lastTorrentId {
-						log.Println(tor.RawLine)
-						irc.Msg(ircChannel, tor.RawLine)
-						lastTorrentId = tor.TorrentId
-					}
-				}
-
-				// save announce setting to DB
-				updateSetting(db, LAST_ANNOUNCE_SETTING_ID, lastTorrentId)
-			},
-			"fetchJob",
-			1,
-		),
-	)
-	if err != nil {
-		log.Println("Error in job: " + err.Error())
-	}
-	// each job has a unique id
-	log.Println("Cron Job id:" + j.ID().String())
-
-	// start the scheduler
-	go s.Start()
-
-	log.Println("Press CTRL+C to exit")
-
-	// Start up bot (this blocks until we disconnect)
-	irc.Run()
-	//select {} // block forever
+	return db
 }
 
 func getSetting(db *sql.DB, settingId int) *Setting {
