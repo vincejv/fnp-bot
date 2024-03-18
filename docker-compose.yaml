@@ -13,6 +13,7 @@ services:
       CRAWLER_COOKIE: "remember_web_COOKIE_TOKEN" # Site token
       FETCH_SEC: 5   # Fetch frequency
       INIT_TORRENT_ID: 78336  # Start fetching from this torrent (used for initial setting only!)
+      FETCH_BASE_URL: "https://site.com"
     restart: unless-stopped
     logging:
       options:
