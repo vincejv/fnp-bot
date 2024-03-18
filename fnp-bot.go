@@ -56,8 +56,7 @@ func main() {
 
 	hijackSession := func(bot *hbot.Bot) {
 		bot.SSL = true
-		bot.SASL = true
-		bot.Password = ircPassword
+		bot.Password = ircPassword // or ZNC password
 	}
 	channels := func(bot *hbot.Bot) {
 		bot.Channels = []string{ircChannel}
@@ -67,7 +66,7 @@ func main() {
 		panic(err)
 	}
 
-	irc.AddTrigger(nickServAuth)
+	//irc.AddTrigger(nickServAuth)
 
 	irc.Logger.SetHandler(logi.StdoutHandler)
 
@@ -233,13 +232,13 @@ func getTypeFriendlyStr(typeId int) string {
 // }
 
 // This trigger replies Hello when you say hello
-var nickServAuth = hbot.Trigger{
-	Condition: func(bot *hbot.Bot, m *hbot.Message) bool {
-		return strings.Contains(m.Raw, " :End of message of the day.") && strings.Contains(m.From, ircDomainTrigger)
-		//return m.Command == "PRIVMSG" && m.Content == "-info"
-	},
-	Action: func(irc *hbot.Bot, m *hbot.Message) bool {
-		irc.Msg("NickServ", "identify "+ircPassword)
-		return false
-	},
-}
+// var nickServAuth = hbot.Trigger{
+// 	Condition: func(bot *hbot.Bot, m *hbot.Message) bool {
+// 		return strings.Contains(m.Raw, " :End of message of the day.") && strings.Contains(m.From, ircDomainTrigger)
+// 		//return m.Command == "PRIVMSG" && m.Content == "-info"
+// 	},
+// 	Action: func(irc *hbot.Bot, m *hbot.Message) bool {
+// 		irc.Msg("NickServ", "identify "+zncPassword)
+// 		return false
+// 	},
+// }
