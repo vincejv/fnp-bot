@@ -68,7 +68,6 @@ func main() {
 	}
 
 	irc.AddTrigger(nickServAuth)
-	irc.AddTrigger(sayJoinMsg)
 
 	irc.Logger.SetHandler(logi.StdoutHandler)
 
@@ -222,16 +221,16 @@ func getTypeFriendlyStr(typeId int) string {
 }
 
 // This trigger replies Hello when you say hello
-var sayJoinMsg = hbot.Trigger{
-	Condition: func(bot *hbot.Bot, m *hbot.Message) bool {
-		return strings.Contains(m.Raw, ircChannel+" :End of /NAMES list.") && strings.Contains(m.From, ircDomainTrigger)
-		//return m.Command == "PRIVMSG" && m.Content == "-info"
-	},
-	Action: func(irc *hbot.Bot, m *hbot.Message) bool {
-		irc.Msg(ircChannel, fmt.Sprintf("Hello %s!! Will start announcing soon...", ircChannel))
-		return false
-	},
-}
+// var sayJoinMsg = hbot.Trigger{
+// 	Condition: func(bot *hbot.Bot, m *hbot.Message) bool {
+// 		return strings.Contains(m.Raw, ircChannel+" :End of /NAMES list.") && strings.Contains(m.From, ircDomainTrigger)
+// 		//return m.Command == "PRIVMSG" && m.Content == "-info"
+// 	},
+// 	Action: func(irc *hbot.Bot, m *hbot.Message) bool {
+// 		irc.Msg(ircChannel, fmt.Sprintf("Hello %s!! Will start announcing soon...", ircChannel))
+// 		return false
+// 	},
+// }
 
 // This trigger replies Hello when you say hello
 var nickServAuth = hbot.Trigger{
