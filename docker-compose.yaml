@@ -1,7 +1,3 @@
-# FNP IRC Bot
-
-### docker-compose.yaml
-```yaml
 version: '3.1'
 services:
   fnpbot:
@@ -23,4 +19,3 @@ services:
         max-size: "20m"
         max-file: "5"
         compress: "true"
-```

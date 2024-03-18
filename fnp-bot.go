@@ -29,7 +29,8 @@ var ircPassword = os.Getenv("IRC_BOT_PASSWORD")
 // var ircDomainTrigger = os.Getenv("IRC_DOMAIN_TRIGGER") // Trigger for hello message and nickserv auth
 var crawlerCookie = os.Getenv("CRAWLER_COOKIE")
 var fetchSec = os.Getenv("FETCH_SEC")
-var initLastTorrentId = os.Getenv("INIT_TORRENT_ID")
+var fetchSiteBaseUrl = os.Getenv("FETCH_BASE_URL")
+var initialItemId = os.Getenv("INIT_TORRENT_ID")
 
 type Announce struct {
 	TorrentId   int
@@ -51,6 +52,8 @@ type Setting struct {
 
 func main() {
 	flag.Parse()
+	log.Print("Starting FNP Announcebot")
+	logSettings()
 
 	// Prepare SQLite Database
 	db := openDb()
@@ -69,11 +72,23 @@ func main() {
 
 	// start the scheduler routine
 	go scheduler.Start()
-	log.Println("Press CTRL+C to exit")
+	log.Println("---- Press CTRL+C to exit ----")
 
 	// Start up bot (this blocks until we disconnect)
 	irc.Run()
 	//select {} // block forever
+}
+
+func logSettings() {
+	log.Println("Environment settings:")
+	log.Printf("IRC Server: %s\n", serv)
+	log.Printf("Bot nickname: %s\n", nick)
+	log.Printf("IRC Announce channel: %s\n", ircChannel)
+	log.Printf("IRC Password: %s\n", "*******")   // ircPassword masked for safety
+	log.Printf("Crawler cookie: %s\n", "*******") // crawlerCookie masked for safety
+	log.Printf("Fetch sync time (in seconds): %s\n", fetchSec)
+	log.Printf("Site base url for fetching: %s\n", fetchSiteBaseUrl)
+	log.Printf("Initial item id: %s\n", initialItemId)
 }
 
 func createIRCBot() *hbot.Bot {
@@ -113,7 +128,7 @@ func scheduleFetchJob(scheduler gocron.Scheduler, fetchSecNum int, db *sql.DB, i
 			func(a string, b int) {
 				// Request the HTML page.
 				client := &http.Client{}
-				req, err := http.NewRequest("GET", "https://fearnopeer.com/torrents?perPage=50", nil)
+				req, err := http.NewRequest("GET", fmt.Sprintf("%s/torrents?perPage=50", fetchSiteBaseUrl), nil)
 				req.Header.Set("Cookie", crawlerCookie)
 				req.Header.Set("User-Agent", "Golang_IRC_Crawler_Bot/1.0")
 				if err != nil {
@@ -145,7 +160,7 @@ func scheduleFetchJob(scheduler gocron.Scheduler, fetchSecNum int, db *sql.DB, i
 					categoryId, _ := strconv.Atoi(categoryIdStr)
 					typeIdStr, _ := s.Attr("data-type-id")
 					typeId, _ := strconv.Atoi(typeIdStr)
-					url := fmt.Sprintf("https://fearnopeer.com/torrents/%d", torrentId)
+					url := fmt.Sprintf("%s/torrents/%d", fetchSiteBaseUrl, torrentId)
 					title := strings.TrimSpace(s.Find("a.torrent-search--list__name").Text())
 					uploader := strings.TrimSpace(s.Find("span.torrent-search--list__uploader").Text())
 
@@ -211,7 +226,7 @@ func openDb() *sql.DB {
 		log.Fatal(err)
 	}
 
-	_, err = db.Exec(`INSERT INTO announce(id, name, value) VALUES(?, 'lastTorrentId', ?)`, LAST_ANNOUNCE_SETTING_ID, initLastTorrentId)
+	_, err = db.Exec(`INSERT INTO announce(id, name, value) VALUES(?, 'lastTorrentId', ?)`, LAST_ANNOUNCE_SETTING_ID, initialItemId)
 	if err != nil {
 		log.Println(err)
 		log.Println("Existing `lastTorrentId` is set, ignoring `INIT_TORRENT_ID` setting, it's only used for initialization of DB")
