@@ -19,7 +19,7 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build 
 FROM --platform=${TARGETPLATFORM} alpine:latest
 RUN apk --update --no-cache add curl && rm -rf /var/cache/apk/*
 COPY --from=build-env /go/bin/fnp-bot /usr/bin/fnp-bot
-RUN mkdir -p /config
+RUN mkdir -p /config && chown -R 100:100 /config
 
 # Create a group and user
 RUN addgroup -S fnp-bot && adduser -S fnp-bot -G fnp-bot
