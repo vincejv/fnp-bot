@@ -27,11 +27,14 @@ var ircChannel = os.Getenv("IRC_CHANNEL")
 var ircPassword = os.Getenv("IRC_BOT_PASSWORD")
 
 // var ircDomainTrigger = os.Getenv("IRC_DOMAIN_TRIGGER") // Trigger for hello message and nickserv auth
-var crawlerCookie = os.Getenv("CRAWLER_COOKIE")
-var fetchSec = os.Getenv("FETCH_SEC")
-var fetchSiteBaseUrl = os.Getenv("FETCH_BASE_URL")
-var enableSasl = os.Getenv("ENABLE_SASL")
-var initialItemId = os.Getenv("INIT_TORRENT_ID")
+var crawlerCookie = getEnv("CRAWLER_COOKIE", "")
+var fetchSec = getEnv("FETCH_SEC", "10")
+var fetchNoItems = getEnv("FETCH_NO_OF_ITEMS", "25")
+var fetchSiteBaseUrl = getEnv("FETCH_BASE_URL", "https://site.com")
+var enableSSL = getEnv("ENABLE_SSL", "True")
+var enableSasl = getEnv("ENABLE_SASL", "False")
+var initialItemId = getEnv("INIT_TORRENT_ID", "0")
+var announceLineFmt = getEnv("ANNOUNCE_LINE_FMT", "Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]")
 
 type Announce struct {
 	TorrentId   int
@@ -88,16 +91,20 @@ func logSettings() {
 	log.Printf("IRC Announce channel: %s\n", ircChannel)
 	log.Printf("IRC Password: %s\n", "*******")   // ircPassword masked for safety
 	log.Printf("Crawler cookie: %s\n", "*******") // crawlerCookie masked for safety
+	log.Printf("Enable SSL: %s\n", enableSSL)
 	log.Printf("Enable SASL: %s\n", enableSasl)
 	log.Printf("Fetch sync time (in seconds): %s\n", fetchSec)
+	log.Printf("Number of items to fetch per pull: %s\n", fetchNoItems)
 	log.Printf("Site base url for fetching: %s\n", fetchSiteBaseUrl)
 	log.Printf("Initial item id: %s\n", initialItemId)
+	log.Printf("Announce line format: %s\n", announceLineFmt)
 }
 
 func createIRCBot() *hbot.Bot {
 	enableSaslBool, _ := strconv.ParseBool(enableSasl)
+	enableSSLBool, _ := strconv.ParseBool(enableSSL)
 	botConfig := func(bot *hbot.Bot) {
-		bot.SSL = true
+		bot.SSL = enableSSLBool
 		bot.SASL = enableSaslBool
 		bot.Password = ircPassword // SASL (if enabled) or ZNC password
 	}
@@ -133,7 +140,7 @@ func scheduleFetchJob(scheduler gocron.Scheduler, fetchSecNum int, db *sql.DB, i
 			func(a string, b int) {
 				// Request the HTML page.
 				client := &http.Client{}
-				req, err := http.NewRequest("GET", fmt.Sprintf("%s/torrents?perPage=50", fetchSiteBaseUrl), nil)
+				req, err := http.NewRequest("GET", fmt.Sprintf("%s/torrents?perPage=%s", fetchSiteBaseUrl, fetchNoItems), nil)
 				req.Header.Set("Cookie", crawlerCookie)
 				req.Header.Set("User-Agent", "Golang_IRC_Crawler_Bot/1.0")
 				if err != nil {
@@ -175,7 +182,8 @@ func scheduleFetchJob(scheduler gocron.Scheduler, fetchSecNum int, db *sql.DB, i
 					}
 
 					size := strings.TrimSpace(s.Find("td.torrent-search--list__size").Text())
-					announceLine := fmt.Sprintf("Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]", getCategoryFriendlyStr(categoryId), getTypeFriendlyStr(typeId), title, size, uploader, url)
+					// Category, type, name, size, uploader, url
+					announceLine := fmt.Sprintf(announceLineFmt, getCategoryFriendlyStr(categoryId), getTypeFriendlyStr(typeId), title, size, uploader, url)
 
 					// Store fetched torrents temporarily for processing
 					announceDoc := Announce{TorrentId: torrentId, Name: title, Size: size, Category: getCategoryFriendlyStr(categoryId),
@@ -317,6 +325,14 @@ func getTypeFriendlyStr(typeId int) string {
 	default:
 		return "Misc"
 	}
+}
+
+// Utility function for getting environment variables with default value
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
 }
 
 // This trigger replies Hello when you say hello

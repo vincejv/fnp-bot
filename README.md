@@ -18,7 +18,13 @@ services:
       FETCH_SEC: 5   # Fetch frequency
       INIT_TORRENT_ID: 78336  # Start fetching from this torrent (used for initial setting only!)
       FETCH_BASE_URL: "https://site.com"
+      FETCH_NO_OF_ITEMS: "25"
       ENABLE_SASL: false  # False if using ZNC or anonymous login, True if using SASL (doesn't support NickServ auth for now!)
+      ENABLE_SSL: false   # SSL flag for IRC connection
+      # Order is as follows: Category, type, name, size, uploader, url
+      # must specify a format specifier (%s) for each field
+      # %n if you want to skip the variable from printing
+      ANNOUNCE_LINE_FMT: "Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]" 
     restart: unless-stopped
     logging:
       options:

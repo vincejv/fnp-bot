@@ -20,11 +20,13 @@ FROM --platform=${TARGETPLATFORM} alpine:latest
 RUN apk --update --no-cache add curl && rm -rf /var/cache/apk/*
 COPY --from=build-env /go/bin/fnp-bot /usr/bin/fnp-bot
 RUN mkdir -p /config && chown -R 100:100 /config
+COPY entrypoint.sh /entrypoint.sh
 
 # Create a group and user
 RUN addgroup -S fnp-bot && adduser -S fnp-bot -G fnp-bot
 USER fnp-bot
 
-ENTRYPOINT ["fnp-bot"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["fnp-bot"]
 
 EXPOSE 8095
