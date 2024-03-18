@@ -137,7 +137,7 @@ func main() {
 					_, err := mongoColl.InsertOne(context.TODO(), announceDoc)
 					if err == nil {
 						// announce to DB as not yet inserted in database
-						log.Println(announceLine + "\n")
+						log.Println(announceLine)
 						irc.Msg(ircChannel, announceLine)
 						//fmt.Printf("Inserted document with _id: %v\n", res.InsertedID)
 					}
