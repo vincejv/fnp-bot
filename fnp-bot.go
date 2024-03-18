@@ -147,7 +147,7 @@ func scheduleFetchJob(scheduler gocron.Scheduler, fetchSecNum int, db *sql.DB, i
 					typeId, _ := strconv.Atoi(typeIdStr)
 					url := fmt.Sprintf("https://fearnopeer.com/torrents/%d", torrentId)
 					title := strings.TrimSpace(s.Find("a.torrent-search--list__name").Text())
-					uploader := strings.TrimSpace(s.Find("span.user-tag torrent-search--list__uploader").Text())
+					uploader := strings.TrimSpace(s.Find("span.torrent-search--list__uploader").Text())
 
 					// remove parenthesis for anonymous uploader
 					if strings.Contains(uploader, "(Anonymous)") {
