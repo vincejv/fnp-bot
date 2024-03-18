@@ -30,6 +30,7 @@ var ircPassword = os.Getenv("IRC_BOT_PASSWORD")
 var crawlerCookie = os.Getenv("CRAWLER_COOKIE")
 var fetchSec = os.Getenv("FETCH_SEC")
 var fetchSiteBaseUrl = os.Getenv("FETCH_BASE_URL")
+var enableSasl = os.Getenv("ENABLE_SASL")
 var initialItemId = os.Getenv("INIT_TORRENT_ID")
 
 type Announce struct {
@@ -87,14 +88,17 @@ func logSettings() {
 	log.Printf("IRC Announce channel: %s\n", ircChannel)
 	log.Printf("IRC Password: %s\n", "*******")   // ircPassword masked for safety
 	log.Printf("Crawler cookie: %s\n", "*******") // crawlerCookie masked for safety
+	log.Printf("Enable SASL: %s\n", enableSasl)
 	log.Printf("Fetch sync time (in seconds): %s\n", fetchSec)
 	log.Printf("Site base url for fetching: %s\n", fetchSiteBaseUrl)
 	log.Printf("Initial item id: %s\n", initialItemId)
 }
 
 func createIRCBot() *hbot.Bot {
+	enableSaslBool, _ := strconv.ParseBool(enableSasl)
 	botConfig := func(bot *hbot.Bot) {
 		bot.SSL = true
+		bot.SASL = enableSaslBool
 		bot.Password = ircPassword // SASL (if enabled) or ZNC password
 	}
 	channels := func(bot *hbot.Bot) {

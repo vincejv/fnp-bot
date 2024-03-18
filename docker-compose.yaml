@@ -14,6 +14,7 @@ services:
       FETCH_SEC: 5   # Fetch frequency
       INIT_TORRENT_ID: 78336  # Start fetching from this torrent (used for initial setting only!)
       FETCH_BASE_URL: "https://site.com"
+      ENABLE_SASL: false  # False if using ZNC or anonymous login, True if using SASL (doesn't support NickServ auth for now!)
     restart: unless-stopped
     logging:
       options:
