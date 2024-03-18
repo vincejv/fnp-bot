@@ -57,6 +57,7 @@ func main() {
 
 	// Prepare SQLite Database
 	db := openDb()
+	defer db.Close()
 
 	// Prepare IRC Bot
 	irc := createIRCBot()
@@ -216,8 +217,6 @@ func openDb() *sql.DB {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	defer db.Close()
 
 	sts := `CREATE TABLE IF NOT EXISTS announce(id INTEGER PRIMARY KEY, name TEXT, value INT);`
 	_, err = db.Exec(sts)
