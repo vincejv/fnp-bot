@@ -13,12 +13,13 @@ WORKDIR /go/src/github.com/vincejv/fnp-bot
 
 # Compile go binaries
 ENV GOPATH=/go
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build -v -a -ldflags "-s -w" -o /go/bin/fnp-bot .
+RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build -v -a -ldflags "-linkmode external -extldflags -static -s -w" -o /go/bin/fnp-bot .
 
 # Build final image from alpine
 FROM --platform=${TARGETPLATFORM} alpine:latest
 RUN apk --update --no-cache add curl && rm -rf /var/cache/apk/*
 COPY --from=build-env /go/bin/fnp-bot /usr/bin/fnp-bot
+RUN mkdir -p /config
 
 # Create a group and user
 RUN addgroup -S fnp-bot && adduser -S fnp-bot -G fnp-bot

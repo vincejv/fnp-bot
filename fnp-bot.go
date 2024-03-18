@@ -1,7 +1,7 @@
 package main
 
 import (
-	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
@@ -13,11 +13,12 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-co-op/gocron/v2"
+	_ "github.com/mattn/go-sqlite3"
 	hbot "github.com/whyrusleeping/hellabot"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	logi "gopkg.in/inconshreveable/log15.v2"
 )
+
+const LAST_ANNOUNCE_SETTING_ID int = 1
 
 var serv = os.Getenv("IRC_SERVER")
 var nick = os.Getenv("BOT_NICK")
@@ -25,10 +26,9 @@ var ircChannel = os.Getenv("IRC_CHANNEL")
 var ircPassword = os.Getenv("IRC_BOT_PASSWORD")
 
 // var ircDomainTrigger = os.Getenv("IRC_DOMAIN_TRIGGER") // Trigger for hello message and nickserv auth
-var mongoConnectionStr = os.Getenv("MONGODB_CONN_STRING")
-var dbName = os.Getenv("DB_NAME")
 var crawlerCookie = os.Getenv("CRAWLER_COOKIE")
 var fetchSec = os.Getenv("FETCH_SEC")
+var initLastTorrentId = os.Getenv("INIT_TORRENT_ID")
 
 type Announce struct {
 	TorrentId   int
@@ -42,18 +42,36 @@ type Announce struct {
 	RawLine     string
 }
 
+type Setting struct {
+	id    int
+	name  string
+	value int
+}
+
 func main() {
 	flag.Parse()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoConnectionStr))
+	// Prepare SQLite Database -- START
+	db, err := sql.Open("sqlite3", "/config/announce.db")
+
 	if err != nil {
-		log.Println("Error mongo connection")
+		log.Fatal(err)
 	}
-	mongoColl := mongoClient.Database(dbName).Collection("announces")
-	//var result bson.M
-	//mongoColl.FindOne(context.TODO(), bson.D{{"title", "test"}}).Decode(&result)
+
+	defer db.Close()
+
+	sts := `CREATE TABLE IF NOT EXISTS announce(id INTEGER PRIMARY KEY, name TEXT, value INT);`
+	_, err = db.Exec(sts)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = db.Exec(`INSERT INTO announce(id, name, value) VALUES(?, 'lastTorrentId', ?`, LAST_ANNOUNCE_SETTING_ID, initLastTorrentId)
+	if err != nil {
+		log.Println("Existing `lastTorrentId` is set, ignoring `LAST_TORRENT_ID` setting, it's only used for initialization of DB")
+	}
+	// Prepare SQLite Database -- END
 
 	hijackSession := func(bot *hbot.Bot) {
 		bot.SSL = true
@@ -64,7 +82,7 @@ func main() {
 	}
 	irc, err := hbot.NewBot(serv, nick, hijackSession, channels)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	//irc.AddTrigger(nickServAuth)
@@ -112,6 +130,8 @@ func main() {
 					log.Printf("Error in scheduler: %s", err.Error())
 				}
 
+				var fetchedTors []Announce
+
 				// Find the review items
 				doc.Find("body > main > article > div > section.panelV2.torrent-search__results > div > table > tbody > tr").Each(func(i int, s *goquery.Selection) {
 					// For each item found, get the title
@@ -131,20 +151,30 @@ func main() {
 
 					size := strings.TrimSpace(s.Find("td.torrent-search--list__size").Text())
 					announceLine := fmt.Sprintf("Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]", getCategoryFriendlyStr(categoryId), getTypeFriendlyStr(typeId), title, size, uploader, url)
+
+					// Store fetched torrents temporarily
 					announceDoc := Announce{TorrentId: torrentId, Name: title, Size: size, Category: getCategoryFriendlyStr(categoryId),
 						Type: getTypeFriendlyStr(typeId), Uploader: uploader, URL: url, RawLine: announceLine, CreatedDate: time.Now()}
-
-					_, err := mongoColl.InsertOne(context.TODO(), announceDoc)
-					if err == nil {
-						// announce to DB as not yet inserted in database
-						log.Println(announceLine)
-						irc.Msg(ircChannel, announceLine)
-						//fmt.Printf("Inserted document with _id: %v\n", res.InsertedID)
-					}
-
+					fetchedTors = append(fetchedTors, announceDoc)
 				})
+
+				// refresh announce setting from DB
+				announceSetting := getSetting(db, LAST_ANNOUNCE_SETTING_ID)
+				lastTorrentId := announceSetting.value
+
+				// Examine fetched torrents
+				for _, tor := range fetchedTors {
+					if tor.TorrentId > lastTorrentId {
+						log.Println(tor.RawLine)
+						irc.Msg(ircChannel, tor.RawLine)
+						lastTorrentId = tor.TorrentId
+					}
+				}
+
+				// save announce setting to DB
+				updateSetting(db, LAST_ANNOUNCE_SETTING_ID, lastTorrentId)
 			},
-			"hello",
+			"fetchJob",
 			1,
 		),
 	)
@@ -162,6 +192,31 @@ func main() {
 	// Start up bot (this blocks until we disconnect)
 	irc.Run()
 	//select {} // block forever
+}
+
+func getSetting(db *sql.DB, settingId int) *Setting {
+	var searches []Setting
+	row, err := db.Query("SELECT * FROM announce WHERE id = ? LIMIT ?", settingId, 1)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer row.Close()
+	for row.Next() { // Iterate and fetch the records from result cursor
+		item := Setting{}
+		err := row.Scan(&item.id, &item.name, &item.value)
+		if err != nil {
+			log.Fatal(err)
+		}
+		searches = append(searches, item)
+	}
+	if len(searches) == 0 {
+		return nil
+	}
+	return &searches[0]
+}
+
+func updateSetting(db *sql.DB, id int, value int) {
+	db.Exec("UPDATE announce SET value = ? WHERE id = ?", value, id)
 }
 
 func getCategoryFriendlyStr(catId int) string {
