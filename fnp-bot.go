@@ -67,6 +67,8 @@ func startBrowser(ctx context.Context, irc *hbot.Bot) {
 	gotException := make(chan bool, 1)
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
+		case *network.EventWebSocketCreated:
+			log.Printf("Established websocket connection")
 		case *network.EventWebSocketFrameReceived:
 			payload := ev.Response.PayloadData
 
@@ -88,6 +90,10 @@ func startBrowser(ctx context.Context, irc *hbot.Bot) {
 			if announceString != "" {
 				irc.Msg(ircChannel, announceString)
 			}
+		case *network.EventWebSocketFrameError:
+		case *network.EventWebSocketClosed:
+			log.Println("WS closed, reloading page")
+			chromedp.RunResponse(ctx, chromedp.Reload())
 		}
 	})
 	if err := chromedp.Run(ctx, loginAndNavigate(fetchSiteBaseUrl, siteUsername, sitePassword, totpToken)); err != nil {
