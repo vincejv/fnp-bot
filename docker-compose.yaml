@@ -11,6 +11,7 @@ services:
       IRC_CHANNEL: "#fnp-announce-test" # Announce Channel
       IRC_BOT_PASSWORD: "jarvis@fnpbot/ircserver:zncPassword" # SASL/ZNC Server password
       FETCH_BASE_URL: "https://site.com" # Website URL
+      FETCH_NO_OF_ITEMS: "25"  # No of items to fetch during manual fetches (when missing items during chat disconnects)
       ENABLE_SASL: false  # False if using ZNC or anonymous login, True if using SASL (doesn't support NickServ auth for now!)
       ENABLE_SSL: false   # SSL flag for IRC connection
       # Order is as follows: Category, type, name, size, uploader, url
