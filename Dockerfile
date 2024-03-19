@@ -17,7 +17,7 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build 
 
 # Build final image from alpine
 FROM --platform=${TARGETPLATFORM} alpine:latest
-RUN apk --update --no-cache add curl && rm -rf /var/cache/apk/*
+RUN apk --update --no-cache add curl tzdata su-exec && rm -rf /var/cache/apk/*
 COPY --from=build-env /go/bin/fnp-bot /usr/bin/fnp-bot
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && mkdir -p /config && chown -R 100:100 /config
