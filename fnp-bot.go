@@ -204,7 +204,7 @@ func scheduleFetchJob(scheduler gocron.Scheduler, fetchSecNum int, db *sql.DB, i
 				for _, tor := range fetchedTors {
 					if tor.TorrentId > lastTorrentId {
 						log.Println(tor.RawLine)
-						irc.Msg(ircChannel, tor.RawLine)
+						go irc.Msg(ircChannel, tor.RawLine)
 						lastTorrentId = tor.TorrentId
 					}
 				}
