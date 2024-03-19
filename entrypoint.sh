@@ -1,6 +1,5 @@
 #!/bin/bash
 set -e
-chown fnp-bot:fnp-bot -R /config
 if [ "${1:0:1}" = '-' ]; then
     set -- fnp-bot "$@"
 fi
@@ -8,6 +7,7 @@ fi
 if [ $EUID -ne 0 ]; then
     exec "$@"
 else
+    chown fnp-bot:fnp-bot -R /config
     # ensure HOME is set to the fnp-bot user's home dir
     export HOME=$(getent passwd fnp-bot | cut -d : -f 6)
 
