@@ -17,11 +17,22 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build 
 
 # Build final image from alpine
 FROM chromedp/headless-shell:latest as runner
+RUN apt-get update \
+ && apt-get install -y --force-yes --no-install-recommends \
+      apt-transport-https \
+      curl \
+      ca-certificates \
+ && apt-get clean \
+ && apt-get autoremove \
+ && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid 1000 fnp-bot \
     && useradd --uid 1000 --gid fnp-bot --shell /bin/bash --create-home fnp-bot
 COPY --from=build-env /go/bin/fnp-bot /usr/bin/fnp-bot
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh && mkdir -p /config
+
+RUN chmod +x /entrypoint.sh
+
+VOLUME /config
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["fnp-bot"]
