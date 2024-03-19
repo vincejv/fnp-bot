@@ -1,20 +1,18 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
-	"sort"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
-	"github.com/go-co-op/gocron/v2"
+	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/chromedp"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/pquerna/otp/totp"
 	hbot "github.com/whyrusleeping/hellabot"
 	logi "gopkg.in/inconshreveable/log15.v2"
 )
@@ -27,56 +25,61 @@ var ircChannel = os.Getenv("IRC_CHANNEL")
 var ircPassword = os.Getenv("IRC_BOT_PASSWORD")
 
 // var ircDomainTrigger = os.Getenv("IRC_DOMAIN_TRIGGER") // Trigger for hello message and nickserv auth
-var crawlerCookie = getEnv("CRAWLER_COOKIE", "")
 var fetchSec = getEnv("FETCH_SEC", "10")
 var fetchNoItems = getEnv("FETCH_NO_OF_ITEMS", "25")
 var fetchSiteBaseUrl = getEnv("FETCH_BASE_URL", "https://site.com")
 var enableSSL = getEnv("ENABLE_SSL", "True")
 var enableSasl = getEnv("ENABLE_SASL", "False")
-var initialItemId = getEnv("INIT_TORRENT_ID", "0")
 var announceLineFmt = getEnv("ANNOUNCE_LINE_FMT", "Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]")
-
-type Announce struct {
-	TorrentId   int
-	Name        string
-	Size        string
-	CreatedDate time.Time
-	Category    string
-	Type        string
-	Uploader    string
-	URL         string
-	RawLine     string
-}
-
-type Setting struct {
-	id    int
-	name  string
-	value int
-}
+var siteUsername = getEnv("SITE_USERNAME", "")
+var sitePassword = getEnv("SITE_PASSWORD", "")
+var totpToken = getEnv("SITE_TOTP_TOKEN", "")
+var siteApiKey = getEnv("SITE_API_KEY", "")
+var unit3dBotName = getEnv("SITE_BOT_NAME", "SystemBot")
 
 func main() {
 	flag.Parse()
 	log.Print("Starting FNP Announcebot")
 	logSettings()
 
-	// Prepare SQLite Database
-	db := openDb()
-	defer db.Close()
-
 	// Prepare IRC Bot
 	irc := createIRCBot()
-	//irc.AddTrigger(nickServAuth)
 
-	// create a scheduler
-	scheduler := createScheduler()
+	log.Println("Starting browser")
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
 
-	// add a job to the scheduler
-	// each job has a unique id
-	fetchSecNum, _ := strconv.Atoi(fetchSec)
-	scheduleFetchJob(scheduler, fetchSecNum, db, irc)
+	gotException := make(chan bool, 1)
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		switch ev := ev.(type) {
+		case *network.EventWebSocketFrameReceived:
+			payload := ev.Response.PayloadData
 
-	// start the scheduler routine
-	go scheduler.Start()
+			p := NewWebsocketParser()
+			if err := p.Parse(payload); err != nil {
+				log.Println("could not parse websocket message: %v err: %v", payload, err)
+				break
+			}
+
+			if !p.IsValid(unit3dBotName) {
+				break
+			}
+
+			a := p.ParseAnnounce(fetchSiteBaseUrl, siteApiKey)
+			announceString := formatAnnounceStr(a)
+
+			log.Printf("Announcing to IRC: %v\n", announceString)
+
+			if announceString != "" {
+				irc.Msg(ircChannel, announceString)
+			}
+		}
+	})
+	if err := chromedp.Run(ctx, loginAndNavigate(fetchSiteBaseUrl, siteUsername, sitePassword, totpToken)); err != nil {
+		log.Fatalf("could not start chromedp: %v\n", err)
+	}
+	<-gotException
+
 	log.Println("---- Press CTRL+C to exit ----")
 
 	// Start up bot (this blocks until we disconnect)
@@ -96,8 +99,19 @@ func logSettings() {
 	log.Printf("Fetch sync time (in seconds): %s\n", fetchSec)
 	log.Printf("Number of items to fetch per pull: %s\n", fetchNoItems)
 	log.Printf("Site base url for fetching: %s\n", fetchSiteBaseUrl)
-	log.Printf("Initial item id: %s\n", initialItemId)
 	log.Printf("Announce line format: %s\n", announceLineFmt)
+	log.Printf("UNIT3D Bot name: %s\n", unit3dBotName)
+	log.Printf("Site Username: %s\n", siteUsername)
+	log.Printf("Site Password: %s\n", "*******") // masked for safety
+	log.Printf("Site API Key: %s\n", "*******")  // masked for safety
+	log.Printf("TOTP Token: %s\n", "*******")    // masked for safety
+}
+
+func formatAnnounceStr(announceLine *Announce) string {
+	// Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]
+	announceStr := fmt.Sprintf(announceLineFmt, announceLine.Category, announceLine.Type, announceLine.Release,
+		announceLine.Size, announceLine.Uploader, announceLine.Url)
+	return announceStr
 }
 
 func createIRCBot() *hbot.Bot {
@@ -122,211 +136,6 @@ func createIRCBot() *hbot.Bot {
 	return irc
 }
 
-func createScheduler() gocron.Scheduler {
-	scheduler, err := gocron.NewScheduler()
-	if err != nil {
-		// handle error
-		log.Printf("Error while creating scheduler: %s\n", err.Error())
-	}
-	return scheduler
-}
-
-func scheduleFetchJob(scheduler gocron.Scheduler, fetchSecNum int, db *sql.DB, irc *hbot.Bot) {
-	j, err := scheduler.NewJob(
-		gocron.DurationJob(
-			time.Duration(fetchSecNum)*time.Second,
-		),
-		gocron.NewTask(
-			func(a string, b int) {
-				// Request the HTML page.
-				client := &http.Client{}
-				req, err := http.NewRequest("GET", fmt.Sprintf("%s/torrents?perPage=%s", fetchSiteBaseUrl, fetchNoItems), nil)
-				req.Header.Set("Cookie", crawlerCookie)
-				req.Header.Set("User-Agent", "Golang_IRC_Crawler_Bot/1.0")
-				if err != nil {
-					log.Println(err)
-				}
-				res, err := client.Do(req)
-				if err != nil {
-					log.Println(err)
-				}
-				defer res.Body.Close()
-				if res.StatusCode != 200 {
-					log.Printf("Http error: %d\n", res.StatusCode)
-				}
-
-				// Load the HTML document
-				doc, err := goquery.NewDocumentFromReader(res.Body)
-				if err != nil {
-					log.Printf("Error in scheduler: %s", err.Error())
-				}
-
-				var fetchedTors []Announce
-
-				// Scrape the items
-				doc.Find("body > main > article > div > section.panelV2.torrent-search__results > div > table > tbody > tr").Each(func(i int, s *goquery.Selection) {
-
-					torrentIdStr, _ := s.Attr("data-torrent-id")
-					torrentId, _ := strconv.Atoi(torrentIdStr)
-					categoryIdStr, _ := s.Attr("data-category-id")
-					categoryId, _ := strconv.Atoi(categoryIdStr)
-					typeIdStr, _ := s.Attr("data-type-id")
-					typeId, _ := strconv.Atoi(typeIdStr)
-					url := fmt.Sprintf("%s/torrents/%d", fetchSiteBaseUrl, torrentId)
-					title := strings.TrimSpace(s.Find("a.torrent-search--list__name").Text())
-					uploader := strings.TrimSpace(s.Find("span.torrent-search--list__uploader").Text())
-
-					// remove parenthesis for anonymous uploader
-					if strings.Contains(uploader, "(Anonymous)") {
-						uploader = "Anonymous"
-					}
-
-					size := strings.TrimSpace(s.Find("td.torrent-search--list__size").Text())
-					// Category, type, name, size, uploader, url
-					announceLine := fmt.Sprintf(announceLineFmt, getCategoryFriendlyStr(categoryId), getTypeFriendlyStr(typeId), title, size, uploader, url)
-
-					// Store fetched torrents temporarily for processing
-					announceDoc := Announce{TorrentId: torrentId, Name: title, Size: size, Category: getCategoryFriendlyStr(categoryId),
-						Type: getTypeFriendlyStr(typeId), Uploader: uploader, URL: url, RawLine: announceLine, CreatedDate: time.Now()}
-					fetchedTors = append(fetchedTors, announceDoc)
-				})
-
-				// refresh and fetch announce setting from DB
-				announceSetting := getSetting(db, LAST_ANNOUNCE_SETTING_ID)
-				lastTorrentId := announceSetting.value
-
-				// Must sort in ascending so next block will work correctly
-				sort.Slice(fetchedTors, func(tori, torj int) bool {
-					return fetchedTors[tori].TorrentId < fetchedTors[torj].TorrentId
-				})
-
-				// Examine fetched torrents and push to IRC based on last send item id
-				for _, tor := range fetchedTors {
-					if tor.TorrentId > lastTorrentId {
-						log.Println(tor.RawLine)
-						irc.Msg(ircChannel, tor.RawLine)
-						lastTorrentId = tor.TorrentId
-					}
-				}
-
-				// save last announce setting to DB
-				updateSetting(db, LAST_ANNOUNCE_SETTING_ID, lastTorrentId)
-			},
-			"fetchJob",
-			1,
-		),
-	)
-	if err != nil {
-		log.Println("Error creating job: " + err.Error())
-	}
-
-	log.Println("Cron Job created with id:" + j.ID().String())
-}
-
-func openDb() *sql.DB {
-	db, err := sql.Open("sqlite3", "/config/announce.db")
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	sts := `CREATE TABLE IF NOT EXISTS announce(id INTEGER PRIMARY KEY, name TEXT, value INT);`
-	_, err = db.Exec(sts)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	_, err = db.Exec(`INSERT INTO announce(id, name, value) VALUES(?, 'lastTorrentId', ?)`, LAST_ANNOUNCE_SETTING_ID, initialItemId)
-	if err != nil {
-		log.Println(err)
-		log.Println("Existing `lastTorrentId` is set, ignoring `INIT_TORRENT_ID` setting, it's only used for initialization of DB")
-	}
-	return db
-}
-
-func getSetting(db *sql.DB, settingId int) *Setting {
-	var searches []Setting
-	row, err := db.Query("SELECT * FROM announce WHERE id = ? LIMIT ?", settingId, 1)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer row.Close()
-	for row.Next() { // Iterate and fetch the records from result cursor
-		item := Setting{}
-		err := row.Scan(&item.id, &item.name, &item.value)
-		if err != nil {
-			log.Fatal(err)
-		}
-		searches = append(searches, item)
-	}
-	if len(searches) == 0 {
-		log.Printf("Setting with index %d was not found", settingId)
-		return nil
-	}
-	return &searches[0]
-}
-
-func updateSetting(db *sql.DB, id int, value int) {
-	db.Exec("UPDATE announce SET value = ? WHERE id = ?", value, id)
-}
-
-func getCategoryFriendlyStr(catId int) string {
-	switch catId {
-	case 1:
-		return "Movies"
-	case 2:
-		return "TV"
-	case 3:
-		return "Music"
-	case 6:
-		return "Anime"
-	case 4:
-		return "Games"
-	case 5:
-		return "Apps"
-	case 9:
-		return "Sport"
-	case 11:
-		return "Assorted"
-	default:
-		return "Unknown"
-	}
-}
-
-func getTypeFriendlyStr(typeId int) string {
-	switch typeId {
-	case 1:
-		return "Full Disc"
-	case 2:
-		return "Remux"
-	case 3:
-		return "Encode"
-	case 4:
-		return "WEB-DL"
-	case 5:
-		return "WEBRip"
-	case 6:
-		return "HDTV"
-	case 7:
-		return "FLAC"
-	case 11:
-		return "MP3"
-	case 12:
-		return "Mac"
-	case 13:
-		return "Windows"
-	case 17:
-		return "PlayStation"
-	case 14:
-		return "AudioBooks"
-	case 15:
-		return "Books"
-	default:
-		return "Misc"
-	}
-}
-
 // Utility function for getting environment variables with default value
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
@@ -335,26 +144,42 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// This trigger replies Hello when you say hello
-// var sayJoinMsg = hbot.Trigger{
-// 	Condition: func(bot *hbot.Bot, m *hbot.Message) bool {
-// 		return strings.Contains(m.Raw, ircChannel+" :End of /NAMES list.") && strings.Contains(m.From, ircDomainTrigger)
-// 		//return m.Command == "PRIVMSG" && m.Content == "-info"
-// 	},
-// 	Action: func(irc *hbot.Bot, m *hbot.Message) bool {
-// 		irc.Msg(ircChannel, fmt.Sprintf("Hello %s!! Will start announcing soon...", ircChannel))
-// 		return false
-// 	},
-// }
+func getOtpKey(totpToken string) string {
+	otp, err := totp.GenerateCode(totpToken, time.Now())
+	if err != nil {
+		log.Fatal("failed totp code")
+	}
+	return otp
+}
 
-// This trigger replies Hello when you say hello
-// var nickServAuth = hbot.Trigger{
-// 	Condition: func(bot *hbot.Bot, m *hbot.Message) bool {
-// 		return strings.Contains(m.Raw, " :End of message of the day.") && strings.Contains(m.From, ircDomainTrigger)
-// 		//return m.Command == "PRIVMSG" && m.Content == "-info"
-// 	},
-// 	Action: func(irc *hbot.Bot, m *hbot.Message) bool {
-// 		irc.Msg("NickServ", "identify "+zncPassword)
-// 		return false
-// 	},
-// }
+// login to the webpage and click system chat box
+func loginAndNavigate(url, username, password, totpKey string) chromedp.Tasks {
+	return chromedp.Tasks{
+		chromedp.Navigate(url),
+		chromedp.Sleep(2 * time.Second),
+
+		// wait for login form to be visible
+		chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
+
+		chromedp.SetValue(`//*[@id="username"]`, username, chromedp.BySearch),
+		chromedp.Sleep(1 * time.Second),
+
+		chromedp.SetValue(`//*[@id="password"]`, password, chromedp.BySearch),
+		chromedp.Sleep(1 * time.Second),
+
+		// login
+		chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
+		chromedp.Sleep(2 * time.Second),
+
+		// wait for totp form to be visible and enter totp
+		chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
+		chromedp.SetValue(`//*[@id="code"]`, getOtpKey(totpKey), chromedp.BySearch),
+		chromedp.Sleep(1 * time.Second),
+		chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
+		chromedp.Sleep(2 * time.Second),
+
+		// wait for chat to be visible
+		chromedp.WaitVisible(`//*[@id="chatbody"]`, chromedp.BySearch),
+		chromedp.Click(`#frameTabs > div:nth-child(1) > ul > li.panel__tab.panel__tab--active > a`, chromedp.ByQuery),
+	}
+}
