@@ -10,7 +10,6 @@ services:
       BOT_NICK: "Jarvis" # IRC Bot Nick
       IRC_CHANNEL: "#fnp-announce-test" # Announce Channel
       IRC_BOT_PASSWORD: "jarvis@fnpbot/ircserver:zncPassword" # SASL/ZNC Server password
-      CRAWLER_COOKIE: "remember_web_COOKIE_TOKEN" # Site token
       FETCH_SEC: 5   # Fetch frequency
       INIT_TORRENT_ID: 78336  # Start fetching from this torrent (used for initial setting only!)
       FETCH_BASE_URL: "https://site.com"
@@ -21,6 +20,11 @@ services:
       # must specify a format specifier (%s) for each field
       # %n if you want to skip the variable from printing
       ANNOUNCE_LINE_FMT: "Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]" 
+      SITE_USERNAME: "myunit3dusername"
+      SITE_PASSWORD: "myunit3dpassword"
+      SITE_TOTP_TOKEN: "mytotptoken"
+      SITE_API_KEY: "myapikey"
+      SITE_BOT_NAME: "unit3dbotusername"
     restart: unless-stopped
     logging:
       options:

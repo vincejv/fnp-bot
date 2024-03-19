@@ -16,15 +16,10 @@ ENV GOPATH=/go
 RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build -v -a -ldflags "-linkmode external -extldflags -static -s -w" -o /go/bin/fnp-bot .
 
 # Build final image from alpine
-FROM --platform=${TARGETPLATFORM} alpine:latest
-RUN apk --update --no-cache add curl tzdata su-exec && rm -rf /var/cache/apk/*
+FROM chromedp/headless-shell:latest as runner
 COPY --from=build-env /go/bin/fnp-bot /usr/bin/fnp-bot
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh && mkdir -p /config && chown -R 100:100 /config
-
-# Create a group and user
-RUN addgroup -S fnp-bot && adduser -S fnp-bot -G fnp-bot
-USER fnp-bot
+RUN chmod +x /entrypoint.sh && mkdir -p /config
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["fnp-bot"]
