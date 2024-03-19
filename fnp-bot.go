@@ -55,16 +55,15 @@ func main() {
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	go createBrowser(ctx, irc)
+	go startBrowser(ctx, irc)
 	log.Println("---- Press CTRL+C to exit ----")
 
 	// Start up bot (this blocks until we disconnect)
 	irc.Run()
-	//select {} // block forever
 }
 
 // Start and create browser
-func createBrowser(ctx context.Context, irc *hbot.Bot) {
+func startBrowser(ctx context.Context, irc *hbot.Bot) {
 	gotException := make(chan bool, 1)
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
@@ -162,32 +161,58 @@ func getOtpKey(totpToken string) string {
 
 // login to the webpage and click system chat box
 func loginAndNavigate(url, username, password, totpKey string) chromedp.Tasks {
-	return chromedp.Tasks{
-		chromedp.Navigate(url),
-		chromedp.Sleep(2 * time.Second),
+	if len(totpKey) > 0 {
+		// totp login
+		return chromedp.Tasks{
+			chromedp.Navigate(url),
+			chromedp.Sleep(2 * time.Second),
 
-		// wait for login form to be visible
-		chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
+			// wait for login form to be visible
+			chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
 
-		chromedp.SetValue(`//*[@id="username"]`, username, chromedp.BySearch),
-		chromedp.Sleep(1 * time.Second),
+			chromedp.SetValue(`//*[@id="username"]`, username, chromedp.BySearch),
+			chromedp.Sleep(1 * time.Second),
 
-		chromedp.SetValue(`//*[@id="password"]`, password, chromedp.BySearch),
-		chromedp.Sleep(1 * time.Second),
+			chromedp.SetValue(`//*[@id="password"]`, password, chromedp.BySearch),
+			chromedp.Sleep(1 * time.Second),
 
-		// login
-		chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
-		chromedp.Sleep(2 * time.Second),
+			// login
+			chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
+			chromedp.Sleep(2 * time.Second),
 
-		// wait for totp form to be visible and enter totp
-		chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
-		chromedp.SetValue(`//*[@id="code"]`, getOtpKey(totpKey), chromedp.BySearch),
-		chromedp.Sleep(1 * time.Second),
-		chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
-		chromedp.Sleep(2 * time.Second),
+			// wait for totp form to be visible and enter totp
+			chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
+			chromedp.SetValue(`//*[@id="code"]`, getOtpKey(totpKey), chromedp.BySearch),
+			chromedp.Sleep(1 * time.Second),
+			chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
+			chromedp.Sleep(2 * time.Second),
 
-		// wait for chat to be visible
-		chromedp.WaitVisible(`//*[@id="chatbody"]`, chromedp.BySearch),
-		chromedp.Click(`#frameTabs > div:nth-child(1) > ul > li.panel__tab.panel__tab--active > a`, chromedp.ByQuery),
+			// wait for chat to be visible
+			chromedp.WaitVisible(`//*[@id="chatbody"]`, chromedp.BySearch),
+			chromedp.Click(`#frameTabs > div:nth-child(1) > ul > li.panel__tab.panel__tab--active > a`, chromedp.ByQuery),
+		}
+	} else {
+		// totp-less login
+		return chromedp.Tasks{
+			chromedp.Navigate(url),
+			chromedp.Sleep(2 * time.Second),
+
+			// wait for login form to be visible
+			chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
+
+			chromedp.SetValue(`//*[@id="username"]`, username, chromedp.BySearch),
+			chromedp.Sleep(1 * time.Second),
+
+			chromedp.SetValue(`//*[@id="password"]`, password, chromedp.BySearch),
+			chromedp.Sleep(1 * time.Second),
+
+			// login
+			chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
+			chromedp.Sleep(2 * time.Second),
+
+			// wait for chat to be visible
+			chromedp.WaitVisible(`//*[@id="chatbody"]`, chromedp.BySearch),
+			chromedp.Click(`#frameTabs > div:nth-child(1) > ul > li.panel__tab.panel__tab--active > a`, chromedp.ByQuery),
+		}
 	}
 }

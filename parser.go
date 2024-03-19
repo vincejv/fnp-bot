@@ -177,7 +177,6 @@ func (m *WebsocketMessage) parseCategory() string {
 }
 
 func (m *WebsocketMessage) parseRelease() (url string, rel string) {
-
 	// url
 	// matches into two groups - url and torrent name
 	urlNameRegex := regexp.MustCompile("<a[^>]+href=\\\"(https?\\:\\/\\/[^\\/]+\\/torrents\\/\\d+)\\\"[^>]*>(.*?)<\\/a>")

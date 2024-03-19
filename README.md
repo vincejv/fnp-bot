@@ -14,17 +14,18 @@ services:
       BOT_NICK: "Jarvis" # IRC Bot Nick
       IRC_CHANNEL: "#fnp-announce-test" # Announce Channel
       IRC_BOT_PASSWORD: "jarvis@fnpbot/ircserver:zncPassword" # SASL/ZNC Server password
-      CRAWLER_COOKIE: "remember_web_COOKIE_TOKEN" # Site token
-      FETCH_SEC: 5   # Fetch frequency
-      INIT_TORRENT_ID: 78336  # Start fetching from this torrent (used for initial setting only!)
-      FETCH_BASE_URL: "https://site.com"
-      FETCH_NO_OF_ITEMS: "25"
+      FETCH_BASE_URL: "https://site.com" # Website URL
       ENABLE_SASL: false  # False if using ZNC or anonymous login, True if using SASL (doesn't support NickServ auth for now!)
       ENABLE_SSL: false   # SSL flag for IRC connection
       # Order is as follows: Category, type, name, size, uploader, url
       # must specify a format specifier (%s) for each field
       # %n if you want to skip the variable from printing
       ANNOUNCE_LINE_FMT: "Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]" 
+      SITE_USERNAME: "myunit3dusername"  # site login is required to communicate with the websocket
+      SITE_PASSWORD: "myunit3dpassword"
+      SITE_TOTP_TOKEN: "mytotptoken"  # leave empty or do not set if no OTP for that account
+      SITE_API_KEY: "myapikey"
+      SITE_BOT_NAME: "unit3dbotusername"
     restart: unless-stopped
     logging:
       options:
