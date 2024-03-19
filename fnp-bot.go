@@ -57,7 +57,7 @@ func main() {
 
 			p := NewWebsocketParser()
 			if err := p.Parse(payload); err != nil {
-				log.Println("could not parse websocket message: %v err: %v", payload, err)
+				log.Printf("could not parse websocket message: %v err: %v", payload, err)
 				break
 			}
 
