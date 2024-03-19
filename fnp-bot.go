@@ -46,7 +46,12 @@ func main() {
 	irc := createIRCBot()
 
 	log.Println("Starting browser")
-	ctx, cancel := chromedp.NewContext(context.Background())
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.NoSandbox,
+	)
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancel()
+	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
 	gotException := make(chan bool, 1)
