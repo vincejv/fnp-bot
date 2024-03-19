@@ -6,7 +6,7 @@ version: '3.1'
 services:
   fnpbot:
     container_name: fnp-bot
-    image: vincejv/fnp-bot
+    image: vincejv/fnp-bot:pull-mode
     volumes:
       - ./config:/config
     environment:
