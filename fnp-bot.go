@@ -279,15 +279,15 @@ func getCategoryFriendlyStr(catId int) string {
 		return "TV"
 	case 3:
 		return "Music"
-	case 4:
-		return "Anime"
-	case 5:
-		return "Games"
 	case 6:
+		return "Anime"
+	case 4:
+		return "Games"
+	case 5:
 		return "Apps"
-	case 7:
+	case 9:
 		return "Sport"
-	case 8:
+	case 11:
 		return "Assorted"
 	default:
 		return "Unknown"
