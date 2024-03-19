@@ -17,8 +17,8 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GO111MODULE=on go build 
 
 # Build final image from alpine
 FROM chromedp/headless-shell:latest as runner
-# Create a user group 'xyzgroup'
-RUN addgroup -S fnp-bot && adduser -S -D -h /opt fnp-bot fnp-bot
+RUN groupadd --gid 1000 fnp-bot \
+    && useradd --uid 1000 --gid fnp-bot --shell /bin/bash --create-home fnp-bot
 COPY --from=build-env /go/bin/fnp-bot /usr/bin/fnp-bot
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && mkdir -p /config
