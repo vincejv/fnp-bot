@@ -5,6 +5,7 @@ import (
 )
 
 type Announce struct {
+	Id           int64
 	Url          string
 	Release      string
 	Uploader     string

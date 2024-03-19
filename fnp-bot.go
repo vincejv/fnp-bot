@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
@@ -25,6 +26,7 @@ var ircChannel = os.Getenv("IRC_CHANNEL")
 var ircPassword = os.Getenv("IRC_BOT_PASSWORD")
 
 // var ircDomainTrigger = os.Getenv("IRC_DOMAIN_TRIGGER") // Trigger for hello message and nickserv auth
+var fetchNoItems = getEnv("FETCH_NO_OF_ITEMS", "25") // For manual fetching
 var fetchSiteBaseUrl = getEnv("FETCH_BASE_URL", "https://site.com")
 var enableSSL = getEnv("ENABLE_SSL", "True")
 var enableSasl = getEnv("ENABLE_SASL", "False")
@@ -39,6 +41,7 @@ func main() {
 	flag.Parse()
 	log.Print("Starting FNP Announcebot")
 	logSettings()
+	initMutex()
 
 	// Prepare IRC Bot
 	irc := createIRCBot()
@@ -67,8 +70,24 @@ func startBrowser(ctx context.Context, irc *hbot.Bot) {
 	gotException := make(chan bool, 1)
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
+		case *network.EventResponseReceived:
+			res := ev.Response
+			if strings.Contains(res.URL, "api/") {
+				// login successfully
+				for k, v := range res.Headers {
+					if strings.ToLower(k) == "cookie" {
+						cookieJar.Set(v.(string))
+					}
+				}
+			}
 		case *network.EventWebSocketCreated:
 			log.Printf("Established websocket connection")
+			if refreshedPage.Get() == 1 && lastItemId.Get() != -1 { // paged refresh due to WS Closing
+				refreshedPage.Set(0)
+				fetchTorPage(cookieJar.Get(), lastItemId, irc)
+			} else {
+				log.Println("No manual fetch necessary")
+			}
 		case *network.EventWebSocketFrameReceived:
 			payload := ev.Response.PayloadData
 
@@ -83,17 +102,18 @@ func startBrowser(ctx context.Context, irc *hbot.Bot) {
 			}
 
 			a := p.ParseAnnounce(fetchSiteBaseUrl, siteApiKey)
+			lastItemId.Set(a.Id)
 			announceString := formatAnnounceStr(a)
 
-			log.Printf("Announcing to IRC: %v\n", announceString)
-
 			if announceString != "" {
-				irc.Msg(ircChannel, announceString)
+				log.Printf("Announcing to IRC: %v\n", announceString)
+				go irc.Msg(ircChannel, announceString)
 			}
 		case *network.EventWebSocketFrameError:
 		case *network.EventWebSocketClosed:
+			refreshedPage.Set(1)
 			log.Println("WS closed, reloading page")
-			chromedp.RunResponse(ctx, chromedp.Reload())
+			go chromedp.RunResponse(ctx, network.Enable(), chromedp.Reload())
 		}
 	})
 	if err := chromedp.Run(ctx, loginAndNavigate(fetchSiteBaseUrl, siteUsername, sitePassword, totpToken)); err != nil {
@@ -107,8 +127,8 @@ func logSettings() {
 	log.Printf("IRC Server: %s\n", serv)
 	log.Printf("Bot nickname: %s\n", nick)
 	log.Printf("IRC Announce channel: %s\n", ircChannel)
-	log.Printf("IRC Password: %s\n", "*******")   // ircPassword masked for safety
-	log.Printf("Crawler cookie: %s\n", "*******") // crawlerCookie masked for safety
+	log.Printf("IRC Password: %s\n", "*******") // ircPassword masked for safety
+	log.Printf("Number of items to fetch on manual pull: %s\n", fetchNoItems)
 	log.Printf("Enable SSL: %s\n", enableSSL)
 	log.Printf("Enable SASL: %s\n", enableSasl)
 	log.Printf("Site base url for fetching: %s\n", fetchSiteBaseUrl)
@@ -170,6 +190,7 @@ func loginAndNavigate(url, username, password, totpKey string) chromedp.Tasks {
 	if len(totpKey) > 0 {
 		// totp login
 		return chromedp.Tasks{
+			network.Enable(),
 			chromedp.Navigate(url),
 			chromedp.Sleep(2 * time.Second),
 

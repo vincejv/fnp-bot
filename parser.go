@@ -207,6 +207,7 @@ func (m *WebsocketMessage) parseAnnounce(baseUrl, apiKey string) *Announce {
 
 	a.Url, a.Release = m.parseRelease()
 	tDtl := getTorrentDtl(baseUrl, apiKey, m.parseTorrentId(a.Url))
+	a.Id, _ = strconv.ParseInt(tDtl.ID, 10, 64)
 	a.Size = ByteCountIEC(int64(tDtl.Attributes.Size))
 	a.Type = tDtl.Attributes.Type
 	if tDtl.Attributes.DoubleUpload {
