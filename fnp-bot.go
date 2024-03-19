@@ -25,8 +25,6 @@ var ircChannel = os.Getenv("IRC_CHANNEL")
 var ircPassword = os.Getenv("IRC_BOT_PASSWORD")
 
 // var ircDomainTrigger = os.Getenv("IRC_DOMAIN_TRIGGER") // Trigger for hello message and nickserv auth
-var fetchSec = getEnv("FETCH_SEC", "10")
-var fetchNoItems = getEnv("FETCH_NO_OF_ITEMS", "25")
 var fetchSiteBaseUrl = getEnv("FETCH_BASE_URL", "https://site.com")
 var enableSSL = getEnv("ENABLE_SSL", "True")
 var enableSasl = getEnv("ENABLE_SASL", "False")
@@ -49,11 +47,24 @@ func main() {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
 	)
+
+	// Prepare browser context
 	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
+
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
+	go createBrowser(ctx, irc)
+	log.Println("---- Press CTRL+C to exit ----")
+
+	// Start up bot (this blocks until we disconnect)
+	irc.Run()
+	//select {} // block forever
+}
+
+// Start and create browser
+func createBrowser(ctx context.Context, irc *hbot.Bot) {
 	gotException := make(chan bool, 1)
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
@@ -84,12 +95,6 @@ func main() {
 		log.Fatalf("could not start chromedp: %v\n", err)
 	}
 	<-gotException
-
-	log.Println("---- Press CTRL+C to exit ----")
-
-	// Start up bot (this blocks until we disconnect)
-	irc.Run()
-	//select {} // block forever
 }
 
 func logSettings() {
@@ -101,8 +106,6 @@ func logSettings() {
 	log.Printf("Crawler cookie: %s\n", "*******") // crawlerCookie masked for safety
 	log.Printf("Enable SSL: %s\n", enableSSL)
 	log.Printf("Enable SASL: %s\n", enableSasl)
-	log.Printf("Fetch sync time (in seconds): %s\n", fetchSec)
-	log.Printf("Number of items to fetch per pull: %s\n", fetchNoItems)
 	log.Printf("Site base url for fetching: %s\n", fetchSiteBaseUrl)
 	log.Printf("Announce line format: %s\n", announceLineFmt)
 	log.Printf("UNIT3D Bot name: %s\n", unit3dBotName)
