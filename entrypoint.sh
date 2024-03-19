@@ -6,7 +6,7 @@ if [ "${1:0:1}" = '-' ]; then
 fi
 
 if [ "$(id -u)" -ne 0 ]; then
-    exec "$@"
+    "$@"
 else
-    exec su-exec fnp-bot "$@"
+    su-exec fnp-bot "$@"
 fi
