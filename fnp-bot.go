@@ -200,6 +200,7 @@ func createIRCBot() *ircevent.Connection {
 		UseSASL:      enableSaslBool,
 		SASLLogin:    nick,
 		SASLPassword: ircPassword,
+		SASLOptional: true,
 		Nick:         nick,
 		Debug:        false,
 		RequestCaps:  []string{"server-time", "message-tags"},
