@@ -187,7 +187,7 @@ func (m *WebsocketMessage) parseUploader() string {
 func (m *WebsocketMessage) parseCategory() string {
 	category := ""
 
-	re := regexp.MustCompile(`(?mi)has uploaded a new (.+)\. (.*), grab it now!`)
+	re := regexp.MustCompile(`(?mi)has uploaded a new (.*?)(\..* grab it now!)`)
 	matches := re.FindStringSubmatch(m.Message.Message)
 
 	if len(matches) >= 1 {
