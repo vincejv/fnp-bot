@@ -3,11 +3,9 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
@@ -40,9 +38,6 @@ var siteApiKey = getEnv("SITE_API_KEY", "")
 var unit3dBotName = getEnv("SITE_BOT_NAME", "SystemBot")
 var roomId = getEnv("ROOM_ID", "2")
 
-var wsWatchdogTimerInitVal = 35 // 35 seconds
-var wsWatchdogTimer = wsWatchdogTimerInitVal
-
 type FormatterFunc func(*Announce) string
 
 func main() {
@@ -69,31 +64,11 @@ func main() {
 
 	go startBrowser(ctx, irc)
 
-	go wsWatchdog(ctx)
+	go wsWatchdog(ctx, roomId)
 	log.Println("---- Press CTRL+C to exit ----")
 
 	// Start up bot (this blocks until we disconnect)
 	irc.Run()
-}
-
-func wsWatchdog(ctx context.Context) {
-	log.Println("Starting WS Watchdog")
-	for wsWatchdogTimer > 0 {
-		// poll and check every 1 sec if ws is already established
-		time.Sleep(1 * time.Second)
-		wsWatchdogTimer = wsWatchdogTimer - 1
-		if pingPongWatchdog.Get() >= 1 {
-			// ws Got Ponged
-			pingPongWatchdog.Reset()
-			wsWatchdogTimer = wsWatchdogTimerInitVal
-			return
-		}
-	}
-	refreshedPage.Set(1)
-	log.Println("WS PingPong failed, reloading page")
-	go chromedp.RunResponse(ctx, network.Enable(), chromedp.Reload())
-	log.Println("Stopped WS Watchdog, should reset in a few moments")
-	wsWatchdog(ctx)
 }
 
 func waitAndReload(ctx context.Context, timeout int) {
@@ -106,9 +81,7 @@ func waitAndReload(ctx context.Context, timeout int) {
 			return
 		}
 	}
-	refreshedPage.Set(1)
-	log.Println("WS not acknowledged, reloading page")
-	go chromedp.RunResponse(ctx, network.Enable(), chromedp.Reload())
+	go reloadChatPage(ctx, roomId, "WS not acknowledged, reloading page")
 }
 
 // Start and create browser
@@ -155,12 +128,10 @@ func startBrowser(ctx context.Context, irc *hbot.Bot) {
 			}
 		case *network.EventWebSocketFrameError:
 		case *network.EventWebSocketClosed:
-			refreshedPage.Set(1)
-			log.Println("WS closed, reloading page")
-			go chromedp.RunResponse(ctx, network.Enable(), chromedp.Reload())
+			go reloadChatPage(ctx, roomId, "WS closed/errored, reloading page")
 		}
 	})
-	if err := chromedp.Run(ctx, loginAndNavigate(fetchSiteBaseUrl, siteUsername, sitePassword, totpToken)); err != nil {
+	if err := chromedp.Run(ctx, loginAndNavigate(fetchSiteBaseUrl, siteUsername, sitePassword, roomId, totpToken)); err != nil {
 		log.Fatalf("could not start chromedp: %v\n", err)
 	}
 	<-gotException
@@ -256,67 +227,4 @@ func getOtpKey(totpToken string) string {
 		log.Fatal("failed totp code")
 	}
 	return otp
-}
-
-// login to the webpage and click system chat box
-func loginAndNavigate(url, username, password, totpKey string) chromedp.Tasks {
-	// retrieve cookies
-	cookieTasks := chromedp.Tasks{chromedp.ActionFunc(func(ctx context.Context) error {
-		cookies, err := network.GetCookies().Do(ctx)
-		c := make([]string, len(cookies))
-		for i, v := range cookies {
-			aCookie := fmt.Sprintf("%s=%s", v.Name, v.Value)
-			c[i] = aCookie
-		}
-		cookieJar.Set(strings.Join(c, ";"))
-		if err != nil {
-			return err
-		}
-		return nil
-	}),
-	}
-
-	// login to the site using username and password
-	loginTasks := chromedp.Tasks{
-		network.Enable(),
-		chromedp.Navigate(url),
-		chromedp.Sleep(2 * time.Second),
-
-		// wait for login form to be visible
-		chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
-
-		chromedp.Click(`//*[@id="remember"]`, chromedp.BySearch),
-		chromedp.SetValue(`//*[@id="username"]`, username, chromedp.BySearch),
-		chromedp.Sleep(1 * time.Second),
-
-		chromedp.SetValue(`//*[@id="password"]`, password, chromedp.BySearch),
-		chromedp.Sleep(1 * time.Second),
-
-		// login
-		chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
-		chromedp.Sleep(2 * time.Second),
-	}
-
-	// enter totp
-	totpTasks := chromedp.Tasks{
-		// wait for totp form to be visible and enter totp
-		chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
-		chromedp.SetValue(`//*[@id="code"]`, getOtpKey(totpKey), chromedp.BySearch),
-		chromedp.Sleep(1 * time.Second),
-		chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
-		chromedp.Sleep(2 * time.Second),
-	}
-
-	chatVisibilityTasks := chromedp.Tasks{
-		// wait for chat to be visible
-		chromedp.WaitVisible(`//*[@id="chatbody"]`, chromedp.BySearch),
-		chromedp.Click(`#frameTabs > div:nth-child(1) > ul > li.panel__tab.panel__tab--active > a`, chromedp.ByQuery),
-	}
-
-	if len(totpKey) > 0 {
-		// totp login
-		return append(loginTasks, totpTasks, chatVisibilityTasks, cookieTasks)
-	}
-	// totp-less login
-	return append(loginTasks, chatVisibilityTasks, cookieTasks)
 }
