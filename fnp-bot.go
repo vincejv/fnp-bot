@@ -21,10 +21,10 @@ import (
 
 const LAST_ANNOUNCE_SETTING_ID int = 1
 
-var serv = os.Getenv("IRC_SERVER")
-var nick = os.Getenv("BOT_NICK")
-var ircChannel = os.Getenv("IRC_CHANNEL")
-var ircPassword = os.Getenv("IRC_BOT_PASSWORD")
+var serv = getEnv("IRC_SERVER", "irc.server.net:6697")
+var nick = getEnv("BOT_NICK", "BeepBop")
+var ircChannel = getEnv("IRC_CHANNEL", "#beep-bop-chan")
+var ircPassword = getEnv("IRC_BOT_PASSWORD", "pa3word45")
 
 // var ircDomainTrigger = os.Getenv("IRC_DOMAIN_TRIGGER") // Trigger for hello message and nickserv auth
 var crawlerCookie = getEnv("CRAWLER_COOKIE", "")
@@ -56,7 +56,7 @@ type Setting struct {
 
 func main() {
 	flag.Parse()
-	log.Print("Starting FNP Announcebot")
+	log.Print("Starting FNP Announcebot v1.0")
 	logSettings()
 
 	// Prepare SQLite Database
