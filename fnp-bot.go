@@ -10,10 +10,10 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"github.com/ergochat/irc-go/ircevent"
+	"github.com/ergochat/irc-go/ircmsg"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pquerna/otp/totp"
-	hbot "github.com/whyrusleeping/hellabot"
-	logi "gopkg.in/inconshreveable/log15.v2"
 )
 
 const LAST_ANNOUNCE_SETTING_ID int = 1
@@ -68,7 +68,7 @@ func main() {
 	log.Println("---- Press CTRL+C to exit ----")
 
 	// Start up bot (this blocks until we disconnect)
-	irc.Run()
+	irc.Loop()
 }
 
 func waitAndReload(ctx context.Context, timeout int) {
@@ -85,7 +85,7 @@ func waitAndReload(ctx context.Context, timeout int) {
 }
 
 // Start and create browser
-func startBrowser(ctx context.Context, irc *hbot.Bot) {
+func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 	gotException := make(chan bool, 1)
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
@@ -137,18 +137,18 @@ func startBrowser(ctx context.Context, irc *hbot.Bot) {
 	<-gotException
 }
 
-func processAnnounce(p *WebsocketMessage, irc *hbot.Bot, itemId *ItemIdCtr, parserFn ParserFunc, formatFn FormatterFunc) {
+func processAnnounce(p *WebsocketMessage, irc *ircevent.Connection, itemId *ItemIdCtr, parserFn ParserFunc, formatFn FormatterFunc) {
 	a := parserFn(fetchSiteBaseUrl, siteApiKey)
 	announceString := formatFn(a)
 	if announceString != "" {
 		log.Printf("Announcing to IRC: %v\n", announceString)
-		go irc.Msg(ircChannel, announceString)
+		go irc.Privmsg(ircChannel, announceString)
 	}
 	itemId.Set(a.Id)
 }
 
 // Checks for missed announce items
-func performManualFetch(irc *hbot.Bot) {
+func performManualFetch(irc *ircevent.Connection) {
 	log.Println("Checking for missed items")
 	tautology := func(item PageItem) bool { return true }
 	if lastItemId.Get() != -1 {
@@ -191,26 +191,27 @@ func logSettings() {
 	log.Printf("TOTP Token: %s\n", "*******")    // masked for safety
 }
 
-func createIRCBot() *hbot.Bot {
+func createIRCBot() *ircevent.Connection {
 	enableSaslBool, _ := strconv.ParseBool(enableSasl)
 	enableSSLBool, _ := strconv.ParseBool(enableSSL)
-	botConfig := func(bot *hbot.Bot) {
-		bot.SSL = enableSSLBool
-		bot.SASL = enableSaslBool
-		bot.Password = ircPassword // SASL (if enabled) or ZNC password
+	irc := ircevent.Connection{
+		Server:       serv,
+		UseTLS:       enableSSLBool,
+		UseSASL:      enableSaslBool,
+		SASLLogin:    nick,
+		SASLPassword: ircPassword,
+		Nick:         nick,
+		Debug:        false,
+		RequestCaps:  []string{"server-time", "message-tags"},
+		Log:          log.Default(),
 	}
-	channels := func(bot *hbot.Bot) {
-		bot.Channels = []string{ircChannel}
-	}
+	irc.AddConnectCallback(func(e ircmsg.Message) { irc.Join(ircChannel) })
 
-	irc, err := hbot.NewBot(serv, nick, botConfig, channels)
+	err := irc.Connect()
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// IRC trace and logging
-	irc.Logger.SetHandler(logi.StdoutHandler)
-	return irc
+	return &irc
 }
 
 // Utility function for getting environment variables with default value

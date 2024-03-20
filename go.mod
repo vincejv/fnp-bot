@@ -23,14 +23,7 @@ require (
 
 require (
 	github.com/PuerkitoBio/goquery v1.9.1
-	github.com/ftrvxmtrx/fd v0.0.0-20150925145434-c6d800382fff // indirect
-	github.com/go-stack/stack v1.8.0 // indirect
-	github.com/inconshreveable/log15 v0.0.0-20200109203555-b30bc20e4fd1 // indirect
-	github.com/mattn/go-colorable v0.1.6 // indirect
-	github.com/mattn/go-isatty v0.0.12 // indirect
+	github.com/ergochat/irc-go v0.4.0
 	github.com/pquerna/otp v1.4.0
-	github.com/whyrusleeping/hellabot v0.0.0-20230331073038-70f5dd5c40d9
 	golang.org/x/sys v0.17.0 // indirect
-	gopkg.in/inconshreveable/log15.v2 v2.0.0-20200109203555-b30bc20e4fd1
-	gopkg.in/sorcix/irc.v2 v2.0.0-20200812151606-3f15758ea8c7 // indirect
 )

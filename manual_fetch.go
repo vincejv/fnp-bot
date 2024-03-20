@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	hbot "github.com/whyrusleeping/hellabot"
+	"github.com/ergochat/irc-go/ircevent"
 )
 
 type PageItem struct {
@@ -29,7 +29,7 @@ type PageItem struct {
 type FetchFilter func(PageItem) bool
 
 // Manual fetch for fetching missed items when websocket is temporarily dropped or disconnected
-func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilter, irc *hbot.Bot) {
+func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilter, irc *ircevent.Connection) {
 	// Request the HTML page.
 	url := fmt.Sprintf("%s/torrents?perPage=%s%s", fetchSiteBaseUrl, fetchNoItems, addtlQuery)
 	log.Println("Fetching possible missed items due to WS Closing")
@@ -101,7 +101,7 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 	for _, tor := range fetchedTors {
 		if tor.TorrentId > lastId.Get() {
 			log.Println("Missed item: " + tor.RawLine)
-			go irc.Msg(ircChannel, tor.RawLine)
+			go irc.Privmsg(ircChannel, tor.RawLine)
 			lastId.Set(tor.TorrentId)
 		}
 	}
