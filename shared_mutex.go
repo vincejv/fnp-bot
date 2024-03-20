@@ -29,6 +29,8 @@ var cookieJar = new(CookieJar)
 // Check if page has refreshed
 var refreshedPage = new(ItemIdCtr)
 
+var wsHandshake = new(ItemIdCtr)
+
 func initMutex() {
 	lastItemId.Set(-1)
 	lastFeatId.Set(-1)

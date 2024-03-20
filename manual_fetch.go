@@ -31,9 +31,11 @@ type FetchFilter func(PageItem) bool
 // Manual fetch for fetching missed items when websocket is temporarily dropped or disconnected
 func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilter, irc *hbot.Bot) {
 	// Request the HTML page.
+	url := fmt.Sprintf("%s/torrents?perPage=%s%s", fetchSiteBaseUrl, fetchNoItems, addtlQuery)
 	log.Println("Fetching possible missed items due to WS Closing")
+	log.Println(url)
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/torrents?perPage=%s%s", fetchSiteBaseUrl, fetchNoItems, addtlQuery), nil)
+	req, err := http.NewRequest("GET", url, nil)
 	req.Header.Set("Cookie", cookie)
 	req.Header.Set("User-Agent", "Golang_IRC_Crawler_Bot/1.0")
 	if err != nil {

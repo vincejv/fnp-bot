@@ -70,19 +70,40 @@ func main() {
 	irc.Run()
 }
 
+func waitAndReload(ctx context.Context, timeout int) {
+	for timeout > 0 {
+		// poll and check every 1 sec if ws is already established
+		time.Sleep(1 * time.Second)
+		timeout = timeout - 1
+		if wsHandshake.Get() != 0 {
+			// ws NOW acknowledged, no need to refresh page
+			return
+		}
+	}
+	refreshedPage.Set(1)
+	log.Println("WS not acknowledged, reloading page")
+	go chromedp.RunResponse(ctx, network.Enable(), chromedp.Reload())
+}
+
 // Start and create browser
 func startBrowser(ctx context.Context, irc *hbot.Bot) {
 	gotException := make(chan bool, 1)
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
 		case *network.EventWebSocketCreated:
-			log.Printf("Page loaded, established websocket connection")
+			wsHandshake.Set(0)
+			log.Printf("Page loaded, create websocket connection, waiting for handshake, timeout is 15s, reload if not acknowledged")
 			if refreshedPage.Get() == 1 {
 				// paged refresh due to WS Closing
+				refreshedPage.Set(0)
 				go performManualFetch(irc)
 			} else {
-				log.Println("Intial connection established")
+				log.Println("Intial WS connection created")
 			}
+			go waitAndReload(ctx, 15)
+		case *network.EventWebSocketHandshakeResponseReceived:
+			wsHandshake.Set(1)
+			log.Printf("Handshake acknowledged, connection established")
 		case *network.EventWebSocketFrameReceived:
 			payload := ev.Response.PayloadData
 			p := NewWebsocketParser()
@@ -124,7 +145,6 @@ func processAnnounce(p *WebsocketMessage, irc *hbot.Bot, itemId *ItemIdCtr, pars
 // Checks for missed announce items
 func performManualFetch(irc *hbot.Bot) {
 	log.Println("Checking for missed items")
-	refreshedPage.Set(0)
 	tautology := func(item PageItem) bool { return true }
 	if lastItemId.Get() != -1 {
 		go fetchTorPage(cookieJar.Get(), "", lastItemId, tautology, irc)
