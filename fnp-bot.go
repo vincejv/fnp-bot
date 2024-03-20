@@ -56,7 +56,7 @@ type Setting struct {
 
 func main() {
 	flag.Parse()
-	log.Print("Starting FNP Announcebot v1.1")
+	log.Print("Starting FNP Announcebot v1.2")
 	logSettings()
 
 	// Prepare SQLite Database
@@ -103,12 +103,22 @@ func logSettings() {
 func createIRCBot() *ircevent.Connection {
 	enableSaslBool, _ := strconv.ParseBool(enableSasl)
 	enableSSLBool, _ := strconv.ParseBool(enableSSL)
+	serverPassword := ""
+	saslPassword := ""
+	if enableSaslBool {
+		// if sasl is enabled, can't login with server password
+		saslPassword = ircPassword
+	} else {
+		// if sasl disabled, treat ircPassword as server password
+		serverPassword = ircPassword
+	}
 	irc := ircevent.Connection{
 		Server:       serv,
 		UseTLS:       enableSSLBool,
 		UseSASL:      enableSaslBool,
+		Password:     serverPassword,
 		SASLLogin:    nick,
-		SASLPassword: ircPassword,
+		SASLPassword: saslPassword,
 		SASLOptional: true,
 		Nick:         nick,
 		Debug:        false,
