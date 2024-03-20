@@ -56,7 +56,7 @@ type Setting struct {
 
 func main() {
 	flag.Parse()
-	log.Print("Starting FNP Announcebot v1.0")
+	log.Print("Starting FNP Announcebot v1.1")
 	logSettings()
 
 	// Prepare SQLite Database
@@ -109,6 +109,7 @@ func createIRCBot() *ircevent.Connection {
 		UseSASL:      enableSaslBool,
 		SASLLogin:    nick,
 		SASLPassword: ircPassword,
+		SASLOptional: true,
 		Nick:         nick,
 		Debug:        false,
 		RequestCaps:  []string{"server-time", "message-tags"},
