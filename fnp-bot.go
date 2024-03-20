@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/ergochat/irc-go/ircevent"
+	"github.com/ergochat/irc-go/ircmsg"
 	"github.com/go-co-op/gocron/v2"
 	_ "github.com/mattn/go-sqlite3"
-	hbot "github.com/whyrusleeping/hellabot"
-	logi "gopkg.in/inconshreveable/log15.v2"
 )
 
 const LAST_ANNOUNCE_SETTING_ID int = 1
@@ -80,7 +80,7 @@ func main() {
 	log.Println("---- Press CTRL+C to exit ----")
 
 	// Start up bot (this blocks until we disconnect)
-	irc.Run()
+	irc.Loop()
 	//select {} // block forever
 }
 
@@ -100,26 +100,27 @@ func logSettings() {
 	log.Printf("Announce line format: %s\n", announceLineFmt)
 }
 
-func createIRCBot() *hbot.Bot {
+func createIRCBot() *ircevent.Connection {
 	enableSaslBool, _ := strconv.ParseBool(enableSasl)
 	enableSSLBool, _ := strconv.ParseBool(enableSSL)
-	botConfig := func(bot *hbot.Bot) {
-		bot.SSL = enableSSLBool
-		bot.SASL = enableSaslBool
-		bot.Password = ircPassword // SASL (if enabled) or ZNC password
+	irc := ircevent.Connection{
+		Server:       serv,
+		UseTLS:       enableSSLBool,
+		UseSASL:      enableSaslBool,
+		SASLLogin:    nick,
+		SASLPassword: ircPassword,
+		Nick:         nick,
+		Debug:        false,
+		RequestCaps:  []string{"server-time", "message-tags"},
+		Log:          log.Default(),
 	}
-	channels := func(bot *hbot.Bot) {
-		bot.Channels = []string{ircChannel}
-	}
+	irc.AddConnectCallback(func(e ircmsg.Message) { irc.Join(ircChannel) })
 
-	irc, err := hbot.NewBot(serv, nick, botConfig, channels)
+	err := irc.Connect()
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// IRC trace and logging
-	irc.Logger.SetHandler(logi.StdoutHandler)
-	return irc
+	return &irc
 }
 
 func createScheduler() gocron.Scheduler {
@@ -131,7 +132,7 @@ func createScheduler() gocron.Scheduler {
 	return scheduler
 }
 
-func scheduleFetchJob(scheduler gocron.Scheduler, fetchSecNum int, db *sql.DB, irc *hbot.Bot) {
+func scheduleFetchJob(scheduler gocron.Scheduler, fetchSecNum int, db *sql.DB, irc *ircevent.Connection) {
 	j, err := scheduler.NewJob(
 		gocron.DurationJob(
 			time.Duration(fetchSecNum)*time.Second,
@@ -204,7 +205,7 @@ func scheduleFetchJob(scheduler gocron.Scheduler, fetchSecNum int, db *sql.DB, i
 				for _, tor := range fetchedTors {
 					if tor.TorrentId > lastTorrentId {
 						log.Println(tor.RawLine)
-						go irc.Msg(ircChannel, tor.RawLine)
+						go irc.Privmsg(ircChannel, tor.RawLine)
 						lastTorrentId = tor.TorrentId
 					}
 				}
