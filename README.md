@@ -22,11 +22,14 @@ services:
       # must specify a format specifier (%s) for each field
       # %n if you want to skip the variable from printing
       ANNOUNCE_LINE_FMT: "Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]" 
+      FEATURE_LINE_FMT: "NOW FEATURING!! Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]"
+      FREELEECH_LINE_FMT: "FREELEECH TORRENT!! Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]"
       SITE_USERNAME: "myunit3dusername"  # site login is required to communicate with the websocket
       SITE_PASSWORD: "myunit3dpassword"
       SITE_TOTP_TOKEN: "mytotptoken"  # leave empty or do not set if no OTP for that account
       SITE_API_KEY: "myapikey"
       SITE_BOT_NAME: "unit3dbotusername"
+      ROOM_ID: "2"  # Chat room ID where BOT is sending announces in the UNIT3D site
     restart: unless-stopped
     logging:
       options:

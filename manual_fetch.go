@@ -22,14 +22,18 @@ type PageItem struct {
 	Type        string
 	Uploader    string
 	URL         string
+	Featured    bool
 	RawLine     string
 }
 
-func fetchTorPage(cookie string, lastId *ItemIdCtr, irc *hbot.Bot) {
+type FetchFilter func(PageItem) bool
+
+// Manual fetch for fetching missed items when websocket is temporarily dropped or disconnected
+func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilter, irc *hbot.Bot) {
 	// Request the HTML page.
 	log.Println("Fetching possible missed items due to WS Closing")
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/torrents?perPage=%s", fetchSiteBaseUrl, fetchNoItems), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/torrents?perPage=%s%s", fetchSiteBaseUrl, fetchNoItems, addtlQuery), nil)
 	req.Header.Set("Cookie", cookie)
 	req.Header.Set("User-Agent", "Golang_IRC_Crawler_Bot/1.0")
 	if err != nil {
@@ -64,6 +68,10 @@ func fetchTorPage(cookie string, lastId *ItemIdCtr, irc *hbot.Bot) {
 		url := fmt.Sprintf("%s/torrents/%d", fetchSiteBaseUrl, torrentId)
 		title := strings.TrimSpace(s.Find("a.torrent-search--list__name").Text())
 		uploader := strings.TrimSpace(s.Find("span.torrent-search--list__uploader").Text())
+		featured := false
+		if s.Find("i.torrent-icons__featured").Length() > 0 {
+			featured = true
+		}
 
 		// remove parenthesis for anonymous uploader
 		if strings.Contains(uploader, "(Anonymous)") {
@@ -76,8 +84,10 @@ func fetchTorPage(cookie string, lastId *ItemIdCtr, irc *hbot.Bot) {
 
 		// Store fetched torrents temporarily for processing
 		announceDoc := PageItem{TorrentId: torrentId, Name: title, Size: size, Category: getCategoryFriendlyStr(categoryId),
-			Type: getTypeFriendlyStr(typeId), Uploader: uploader, URL: url, RawLine: announceLine, CreatedDate: time.Now()}
-		fetchedTors = append(fetchedTors, announceDoc)
+			Type: getTypeFriendlyStr(typeId), Uploader: uploader, URL: url, Featured: featured, RawLine: announceLine, CreatedDate: time.Now()}
+		if filter(announceDoc) {
+			fetchedTors = append(fetchedTors, announceDoc)
+		}
 	})
 
 	// Must sort in ascending so next block will work correctly

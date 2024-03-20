@@ -12,6 +12,18 @@ import (
 	"time"
 )
 
+// Announce types
+const (
+	UPLOAD_ANNOUNCE = iota
+	FEATURE_ANNOUNCE
+	OTHER_ANNOUNCE
+	IGNORE_ANNOUNCE
+	FREELEECH_ANNOUNCE
+)
+
+// Parser function types
+type ParserFunc func(string, string) *Announce
+
 type WebsocketMessage struct {
 	Message struct {
 		Bot struct {
@@ -75,7 +87,8 @@ func NewWebsocketParser() *WebsocketMessage {
 	return &WebsocketMessage{}
 }
 
-func (m *WebsocketMessage) Parse(payload string) error {
+// Parses websocket message
+func (m *WebsocketMessage) parseSocketMsg(payload, roomId string) error {
 	// decode socketio message
 	decoded, err := Decode(payload)
 	if err != nil {
@@ -86,7 +99,7 @@ func (m *WebsocketMessage) Parse(payload string) error {
 		return nil
 	}
 
-	room := strings.Contains(decoded.Args, "presence-chatroom.2")
+	room := strings.Contains(decoded.Args, fmt.Sprintf("presence-chatroom.%s", roomId))
 	if !room {
 		return nil
 	}
@@ -94,7 +107,7 @@ func (m *WebsocketMessage) Parse(payload string) error {
 	data := decoded.Args
 
 	// remove room from string
-	cleanJson := strings.TrimLeft(data, `"presence-chatroom.2",`)
+	cleanJson := strings.TrimLeft(data, fmt.Sprintf(`"presence-chatroom.%s",`, roomId))
 
 	// marshal json to struct
 	if err = json.Unmarshal([]byte(cleanJson), &m); err != nil {
@@ -105,42 +118,50 @@ func (m *WebsocketMessage) Parse(payload string) error {
 	return nil
 }
 
-func (m *WebsocketMessage) IsBotName(name string) bool {
+func (m *WebsocketMessage) isBotName(name string) bool {
 	// check for correct user
-	if m.Message.Bot.Name == name {
-		return true
-	}
-	return false
+	return m.Message.Bot.Name == name
 }
 
-func (m *WebsocketMessage) IsSubtitle() bool {
-	if strings.Contains(m.Message.Message, "subtitle for ") {
-		return true
-	}
-	return false
+func (m *WebsocketMessage) isSubtitle() bool {
+	return strings.Contains(m.Message.Message, "subtitle for ")
 }
 
-func (m *WebsocketMessage) IsNewUpload() bool {
-	if strings.Contains(m.Message.Message, "has uploaded") {
-		return true
-	}
-	return false
+func (m *WebsocketMessage) isNewUpload() bool {
+	return strings.Contains(m.Message.Message, "has uploaded")
 }
 
-func (m *WebsocketMessage) IsValid(botname string) bool {
-	if !m.IsBotName(botname) {
-		return false
+func (m *WebsocketMessage) isFeaturedAnnounce() bool {
+	return strings.Contains(m.Message.Message, "has been added to the Featured Torrents Slider")
+}
+
+func (m *WebsocketMessage) isFreeleechAnnounce() bool {
+	return strings.Contains(m.Message.Message, "has been granted 100% FreeLeech")
+}
+
+// Determine announce type
+func (m *WebsocketMessage) determineType(botname string) int {
+	if !m.isBotName(botname) {
+		return IGNORE_ANNOUNCE // ignore chat messages not from Bot user
 	}
 
-	if !m.IsNewUpload() {
-		return false
+	if m.isFeaturedAnnounce() {
+		return FEATURE_ANNOUNCE
 	}
 
-	if m.IsSubtitle() {
-		return false
+	if m.isFreeleechAnnounce() {
+		return FREELEECH_ANNOUNCE
 	}
 
-	return true
+	if !m.isNewUpload() {
+		return IGNORE_ANNOUNCE // not a new upload
+	}
+
+	if m.isSubtitle() {
+		return IGNORE_ANNOUNCE
+	}
+
+	return UPLOAD_ANNOUNCE
 }
 
 func (m *WebsocketMessage) parseUploader() string {
@@ -195,10 +216,7 @@ func (m *WebsocketMessage) parseTorrentId(url string) int {
 	return tId
 }
 
-func (m *WebsocketMessage) ParseAnnounce(baseUrl, apiKey string) *Announce {
-	return m.parseAnnounce(baseUrl, apiKey)
-}
-
+// Parse regular announce, that contains uploader and categories in the announce message itself
 func (m *WebsocketMessage) parseAnnounce(baseUrl, apiKey string) *Announce {
 	a := &Announce{}
 
@@ -207,8 +225,28 @@ func (m *WebsocketMessage) parseAnnounce(baseUrl, apiKey string) *Announce {
 
 	a.Url, a.Release = m.parseRelease()
 	tDtl := getTorrentDtl(baseUrl, apiKey, m.parseTorrentId(a.Url))
+	mapTorDtlToAnnounce(a, tDtl)
+
+	return a
+}
+
+// Parse feature/freeleech announce, that does not contain uploader and categories in the announce message itself
+func (m *WebsocketMessage) parseSparseAnnounce(baseUrl, apiKey string) *Announce {
+	a := &Announce{}
+
+	a.Url, a.Release = m.parseRelease()
+	tDtl := getTorrentDtl(baseUrl, apiKey, m.parseTorrentId(a.Url))
+	mapTorDtlToAnnounce(a, tDtl)
+	a.Category = tDtl.Attributes.Category
+	a.Uploader = tDtl.Attributes.Uploader
+
+	return a
+}
+
+// Maps item detail from API to the announce object
+func mapTorDtlToAnnounce(a *Announce, tDtl *TorrentDetail) {
 	a.Id, _ = strconv.ParseInt(tDtl.ID, 10, 64)
-	a.Size = ByteCountIEC(int64(tDtl.Attributes.Size))
+	a.Size = byteCountIEC(int64(tDtl.Attributes.Size))
 	a.Type = tDtl.Attributes.Type
 	if tDtl.Attributes.DoubleUpload {
 		a.DoubleUpload = "Yes"
@@ -221,67 +259,9 @@ func (m *WebsocketMessage) parseAnnounce(baseUrl, apiKey string) *Announce {
 	} else {
 		a.Internal = "Yes"
 	}
-
-	return a
 }
 
-func Parse(payload string) (string, error) {
-
-	msg, err := parse(payload)
-	if err != nil {
-		return "", err
-	}
-
-	// botName := "Xenomorph-XX121"
-
-	// // check for correct user
-	// if msg.Message.Bot.Name != botName {
-	// 	return "", nil
-	// }
-
-	anMsg := &msg.Message.Message
-
-	// check if message contains "has uploaded"
-	isNewUpload := strings.Contains(*anMsg, "has uploaded")
-	if !isNewUpload {
-		return "", nil
-	}
-
-	isSubtitles := strings.Contains(*anMsg, "subtitle for ")
-	if isSubtitles {
-		return "", nil
-	}
-
-	// uploader
-	var uploader string
-	anonUploader := strings.Contains(*anMsg, "An anonymous user has uploaded")
-	if anonUploader {
-		uploader = "anonymous"
-	} else {
-		// split string and grab idx [1]
-		//ul := strings.Split(*anMsg, "")
-		//uploader = ul[1]
-
-		uploaderRegex := regexp.MustCompile("<a[^>]+href=\\\"https?\\:\\/\\/[^\\/]+\\/users\\/\\w+\\\"[^>]*>(.*?)<\\/a>")
-		uploaderMatches := uploaderRegex.FindStringSubmatch(*anMsg)
-		uploader = uploaderMatches[1]
-	}
-
-	// url
-	// matches into two groups - url and torrent name
-	urlNameRegex := regexp.MustCompile("<a[^>]+href=\\\"(https?\\:\\/\\/[^\\/]+\\/torrents\\/\\d+)\\\"[^>]*>(.*?)<\\/a>")
-	matches := urlNameRegex.FindStringSubmatch(*anMsg)
-
-	torrentUrl := matches[1]
-	torrentName := matches[2]
-
-	announceMsg := ""
-	announceMsg = fmt.Sprintf("New torrent: '%v' Uploader: '%v' - %v", torrentName, uploader, torrentUrl)
-	log.Printf("announce: %+v\n", announceMsg)
-
-	return announceMsg, nil
-}
-
+// Retrieves item detail from the API
 func getTorrentDtl(baseUrl, apiKey string, tid int) *TorrentDetail {
 	torDtl := new(TorrentDetail)
 	resp, err := http.Get(fmt.Sprintf("%s/api/torrents/%d?api_token=%s", baseUrl, tid, apiKey))
@@ -303,7 +283,8 @@ func getTorrentDtl(baseUrl, apiKey string, tid int) *TorrentDetail {
 	return torDtl
 }
 
-func ByteCountIEC(b int64) string {
+// Converts file size to human readable string
+func byteCountIEC(b int64) string {
 	const unit = 1024
 	if b < unit {
 		return fmt.Sprintf("%d B", b)
@@ -315,35 +296,4 @@ func ByteCountIEC(b int64) string {
 	}
 	return fmt.Sprintf("%.2f %ciB",
 		float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-func parse(payload string) (*WebsocketMessage, error) {
-	// decode socketio message
-	decoded, err := Decode(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	if decoded.Method != "new.message" {
-		return nil, nil
-	}
-
-	room := strings.Contains(decoded.Args, "presence-chatroom.2")
-	if !room {
-		return nil, nil
-	}
-
-	data := decoded.Args
-
-	// remove room from string
-	cleanJson := strings.TrimLeft(data, `"presence-chatroom.2",`)
-
-	// marshal json to struct
-	var msg WebsocketMessage
-	if err = json.Unmarshal([]byte(cleanJson), &msg); err != nil {
-		log.Printf("could not unmarshal to struct: %v err: %v\n", cleanJson, err)
-		return nil, err
-	}
-
-	return &msg, nil
 }

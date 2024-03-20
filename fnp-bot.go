@@ -31,11 +31,16 @@ var fetchSiteBaseUrl = getEnv("FETCH_BASE_URL", "https://site.com")
 var enableSSL = getEnv("ENABLE_SSL", "True")
 var enableSasl = getEnv("ENABLE_SASL", "False")
 var announceLineFmt = getEnv("ANNOUNCE_LINE_FMT", "Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]")
+var featureLineFmt = getEnv("FEATURE_LINE_FMT", "NOW FEATURING!! Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]")
+var freeleechLineFmt = getEnv("FREELEECH_LINE_FMT", "FREELEECH TORRENT!! Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]")
 var siteUsername = getEnv("SITE_USERNAME", "")
 var sitePassword = getEnv("SITE_PASSWORD", "")
 var totpToken = getEnv("SITE_TOTP_TOKEN", "")
 var siteApiKey = getEnv("SITE_API_KEY", "")
 var unit3dBotName = getEnv("SITE_BOT_NAME", "SystemBot")
+var roomId = getEnv("ROOM_ID", "2")
+
+type FormatterFunc func(*Announce) string
 
 func main() {
 	flag.Parse()
@@ -70,44 +75,28 @@ func startBrowser(ctx context.Context, irc *hbot.Bot) {
 	gotException := make(chan bool, 1)
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
-		case *network.EventResponseReceived:
-			res := ev.Response
-			if strings.Contains(res.URL, "api/") {
-				// login successfully
-				for k, v := range res.Headers {
-					if strings.ToLower(k) == "cookie" {
-						cookieJar.Set(v.(string))
-					}
-				}
-			}
 		case *network.EventWebSocketCreated:
-			log.Printf("Established websocket connection")
-			if refreshedPage.Get() == 1 && lastItemId.Get() != -1 { // paged refresh due to WS Closing
-				refreshedPage.Set(0)
-				fetchTorPage(cookieJar.Get(), lastItemId, irc)
+			log.Printf("Page loaded, established websocket connection")
+			if refreshedPage.Get() == 1 {
+				// paged refresh due to WS Closing
+				go performManualFetch(irc)
 			} else {
-				log.Println("No manual fetch necessary")
+				log.Println("Intial connection established")
 			}
 		case *network.EventWebSocketFrameReceived:
 			payload := ev.Response.PayloadData
-
 			p := NewWebsocketParser()
-			if err := p.Parse(payload); err != nil {
+			if err := p.parseSocketMsg(payload, roomId); err != nil {
 				log.Printf("could not parse websocket message: %v err: %v", payload, err)
 				break
 			}
-
-			if !p.IsValid(unit3dBotName) {
-				break
-			}
-
-			a := p.ParseAnnounce(fetchSiteBaseUrl, siteApiKey)
-			lastItemId.Set(a.Id)
-			announceString := formatAnnounceStr(a)
-
-			if announceString != "" {
-				log.Printf("Announcing to IRC: %v\n", announceString)
-				go irc.Msg(ircChannel, announceString)
+			announceType := p.determineType(unit3dBotName)
+			if announceType == UPLOAD_ANNOUNCE {
+				go processAnnounce(p, irc, lastItemId, p.parseAnnounce, formatAnnounceStr)
+			} else if announceType == FEATURE_ANNOUNCE {
+				go processAnnounce(p, irc, lastFeatId, p.parseSparseAnnounce, formatFeatureStr)
+			} else if announceType == FREELEECH_ANNOUNCE {
+				go processAnnounce(p, irc, lastFLId, p.parseSparseAnnounce, formatFreeleechStr)
 			}
 		case *network.EventWebSocketFrameError:
 		case *network.EventWebSocketClosed:
@@ -122,6 +111,42 @@ func startBrowser(ctx context.Context, irc *hbot.Bot) {
 	<-gotException
 }
 
+func processAnnounce(p *WebsocketMessage, irc *hbot.Bot, itemId *ItemIdCtr, parserFn ParserFunc, formatFn FormatterFunc) {
+	a := parserFn(fetchSiteBaseUrl, siteApiKey)
+	announceString := formatFn(a)
+	if announceString != "" {
+		log.Printf("Announcing to IRC: %v\n", announceString)
+		go irc.Msg(ircChannel, announceString)
+	}
+	itemId.Set(a.Id)
+}
+
+// Checks for missed announce items
+func performManualFetch(irc *hbot.Bot) {
+	log.Println("Checking for missed items")
+	refreshedPage.Set(0)
+	tautology := func(item PageItem) bool { return true }
+	if lastItemId.Get() != -1 {
+		go fetchTorPage(cookieJar.Get(), "", lastItemId, tautology, irc)
+	} else {
+		log.Println("No manual fetch for uploads necessary")
+	}
+	if lastFeatId.Get() != -1 {
+		go fetchTorPage(cookieJar.Get(), "&featured=true", lastFeatId, tautology, irc)
+	} else {
+		log.Println("No manual fetch for featuring items necessary")
+	}
+	if lastFLId.Get() != -1 {
+		go fetchTorPage(cookieJar.Get(), "&free[0]=100", lastFLId,
+			func(item PageItem) bool {
+				return !item.Featured
+			},
+			irc)
+	} else {
+		log.Println("No manual fetch for FL items necessary")
+	}
+}
+
 func logSettings() {
 	log.Println("Environment settings:")
 	log.Printf("IRC Server: %s\n", serv)
@@ -134,17 +159,11 @@ func logSettings() {
 	log.Printf("Site base url for fetching: %s\n", fetchSiteBaseUrl)
 	log.Printf("Announce line format: %s\n", announceLineFmt)
 	log.Printf("UNIT3D Bot name: %s\n", unit3dBotName)
+	log.Printf("UNIT3D Room id: %s\n", roomId)
 	log.Printf("Site Username: %s\n", siteUsername)
 	log.Printf("Site Password: %s\n", "*******") // masked for safety
 	log.Printf("Site API Key: %s\n", "*******")  // masked for safety
 	log.Printf("TOTP Token: %s\n", "*******")    // masked for safety
-}
-
-func formatAnnounceStr(announceLine *Announce) string {
-	// Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]
-	announceStr := fmt.Sprintf(announceLineFmt, announceLine.Category, announceLine.Type, announceLine.Release,
-		announceLine.Size, announceLine.Uploader, announceLine.Url)
-	return announceStr
 }
 
 func createIRCBot() *hbot.Bot {
@@ -187,59 +206,63 @@ func getOtpKey(totpToken string) string {
 
 // login to the webpage and click system chat box
 func loginAndNavigate(url, username, password, totpKey string) chromedp.Tasks {
+	// retrieve cookies
+	cookieTasks := chromedp.Tasks{chromedp.ActionFunc(func(ctx context.Context) error {
+		cookies, err := network.GetCookies().Do(ctx)
+		c := make([]string, len(cookies))
+		for i, v := range cookies {
+			aCookie := fmt.Sprintf("%s=%s", v.Name, v.Value)
+			c[i] = aCookie
+		}
+		cookieJar.Set(strings.Join(c, ";"))
+		if err != nil {
+			return err
+		}
+		return nil
+	}),
+	}
+
+	// login to the site using username and password
+	loginTasks := chromedp.Tasks{
+		network.Enable(),
+		chromedp.Navigate(url),
+		chromedp.Sleep(2 * time.Second),
+
+		// wait for login form to be visible
+		chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
+
+		chromedp.Click(`//*[@id="remember"]`, chromedp.BySearch),
+		chromedp.SetValue(`//*[@id="username"]`, username, chromedp.BySearch),
+		chromedp.Sleep(1 * time.Second),
+
+		chromedp.SetValue(`//*[@id="password"]`, password, chromedp.BySearch),
+		chromedp.Sleep(1 * time.Second),
+
+		// login
+		chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
+		chromedp.Sleep(2 * time.Second),
+	}
+
+	// enter totp
+	totpTasks := chromedp.Tasks{
+		// wait for totp form to be visible and enter totp
+		chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
+		chromedp.SetValue(`//*[@id="code"]`, getOtpKey(totpKey), chromedp.BySearch),
+		chromedp.Sleep(1 * time.Second),
+		chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
+		chromedp.Sleep(2 * time.Second),
+	}
+
+	chatVisibilityTasks := chromedp.Tasks{
+		// wait for chat to be visible
+		chromedp.WaitVisible(`//*[@id="chatbody"]`, chromedp.BySearch),
+		chromedp.Click(`#frameTabs > div:nth-child(1) > ul > li.panel__tab.panel__tab--active > a`, chromedp.ByQuery),
+	}
+
 	if len(totpKey) > 0 {
 		// totp login
-		return chromedp.Tasks{
-			network.Enable(),
-			chromedp.Navigate(url),
-			chromedp.Sleep(2 * time.Second),
-
-			// wait for login form to be visible
-			chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
-
-			chromedp.SetValue(`//*[@id="username"]`, username, chromedp.BySearch),
-			chromedp.Sleep(1 * time.Second),
-
-			chromedp.SetValue(`//*[@id="password"]`, password, chromedp.BySearch),
-			chromedp.Sleep(1 * time.Second),
-
-			// login
-			chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
-			chromedp.Sleep(2 * time.Second),
-
-			// wait for totp form to be visible and enter totp
-			chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
-			chromedp.SetValue(`//*[@id="code"]`, getOtpKey(totpKey), chromedp.BySearch),
-			chromedp.Sleep(1 * time.Second),
-			chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
-			chromedp.Sleep(2 * time.Second),
-
-			// wait for chat to be visible
-			chromedp.WaitVisible(`//*[@id="chatbody"]`, chromedp.BySearch),
-			chromedp.Click(`#frameTabs > div:nth-child(1) > ul > li.panel__tab.panel__tab--active > a`, chromedp.ByQuery),
-		}
-	} else {
-		// totp-less login
-		return chromedp.Tasks{
-			chromedp.Navigate(url),
-			chromedp.Sleep(2 * time.Second),
-
-			// wait for login form to be visible
-			chromedp.WaitVisible(`//*[@class="auth-form__form"]`, chromedp.BySearch),
-
-			chromedp.SetValue(`//*[@id="username"]`, username, chromedp.BySearch),
-			chromedp.Sleep(1 * time.Second),
-
-			chromedp.SetValue(`//*[@id="password"]`, password, chromedp.BySearch),
-			chromedp.Sleep(1 * time.Second),
-
-			// login
-			chromedp.Click(`//*[@class="auth-form__primary-button"]`, chromedp.BySearch),
-			chromedp.Sleep(2 * time.Second),
-
-			// wait for chat to be visible
-			chromedp.WaitVisible(`//*[@id="chatbody"]`, chromedp.BySearch),
-			chromedp.Click(`#frameTabs > div:nth-child(1) > ul > li.panel__tab.panel__tab--active > a`, chromedp.ByQuery),
-		}
+		return append(loginTasks, totpTasks, chatVisibilityTasks, cookieTasks)
 	}
+	// totp-less login
+	return append(loginTasks, chatVisibilityTasks, cookieTasks)
 }
