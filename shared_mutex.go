@@ -29,12 +29,17 @@ var cookieJar = new(CookieJar)
 // Check if page has refreshed
 var refreshedPage = new(ItemIdCtr)
 
+// Handshake checker
 var wsHandshake = new(ItemIdCtr)
+
+// Ping Pong watchdog timer
+var pingPongWatchdog = new(ItemIdCtr)
 
 func initMutex() {
 	lastItemId.Set(-1)
 	lastFeatId.Set(-1)
 	lastFLId.Set(-1)
+	pingPongWatchdog.Set(0)
 	refreshedPage.Set(0)
 }
 
@@ -47,6 +52,24 @@ func (m *ItemIdCtr) Get() int64 {
 func (m *ItemIdCtr) Set(me int64) {
 	m.Lock()
 	m.me = me
+	m.Unlock()
+}
+
+func (m *ItemIdCtr) Increment() {
+	m.Lock()
+	m.me = m.me + 1
+	m.Unlock()
+}
+
+func (m *ItemIdCtr) Decrement() {
+	m.Lock()
+	m.me = m.me - 1
+	m.Unlock()
+}
+
+func (m *ItemIdCtr) Reset() {
+	m.Lock()
+	m.me = 0
 	m.Unlock()
 }
 

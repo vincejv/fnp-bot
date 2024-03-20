@@ -40,6 +40,9 @@ var siteApiKey = getEnv("SITE_API_KEY", "")
 var unit3dBotName = getEnv("SITE_BOT_NAME", "SystemBot")
 var roomId = getEnv("ROOM_ID", "2")
 
+var wsWatchdogTimerInitVal = 35 // 35 seconds
+var wsWatchdogTimer = wsWatchdogTimerInitVal
+
 type FormatterFunc func(*Announce) string
 
 func main() {
@@ -54,6 +57,7 @@ func main() {
 	log.Println("Starting browser")
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
+		//chromedp.Flag("headless", false),
 	)
 
 	// Prepare browser context
@@ -64,10 +68,32 @@ func main() {
 	defer cancel()
 
 	go startBrowser(ctx, irc)
+
+	go wsWatchdog(ctx)
 	log.Println("---- Press CTRL+C to exit ----")
 
 	// Start up bot (this blocks until we disconnect)
 	irc.Run()
+}
+
+func wsWatchdog(ctx context.Context) {
+	log.Println("Starting WS Watchdog")
+	for wsWatchdogTimer > 0 {
+		// poll and check every 1 sec if ws is already established
+		time.Sleep(1 * time.Second)
+		wsWatchdogTimer = wsWatchdogTimer - 1
+		if pingPongWatchdog.Get() >= 1 {
+			// ws Got Ponged
+			pingPongWatchdog.Reset()
+			wsWatchdogTimer = wsWatchdogTimerInitVal
+			return
+		}
+	}
+	refreshedPage.Set(1)
+	log.Println("WS PingPong failed, reloading page")
+	go chromedp.RunResponse(ctx, network.Enable(), chromedp.Reload())
+	log.Println("Stopped WS Watchdog, should reset in a few moments")
+	wsWatchdog(ctx)
 }
 
 func waitAndReload(ctx context.Context, timeout int) {
@@ -107,6 +133,14 @@ func startBrowser(ctx context.Context, irc *hbot.Bot) {
 		case *network.EventWebSocketFrameReceived:
 			payload := ev.Response.PayloadData
 			p := NewWebsocketParser()
+
+			rawMsg, _ := Decode(payload)
+			if rawMsg.Type == MessageTypePong {
+				log.Println("<---- WS PONG")
+				pingPongWatchdog.Increment()
+				break
+			}
+
 			if err := p.parseSocketMsg(payload, roomId); err != nil {
 				log.Printf("could not parse websocket message: %v err: %v", payload, err)
 				break
