@@ -52,7 +52,10 @@ func main() {
 	log.Println("Starting browser")
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
-		chromedp.Flag("disable-gpu", false),
+		chromedp.NoFirstRun,
+		chromedp.WSURLReadTimeout(time.Second*30),
+		chromedp.Flag("no-zygote", true),
+		chromedp.Flag("single-process", true),
 		chromedp.Flag("blink-settings", "imagesEnabled=false"),
 		chromedp.Flag("disable-domain-reliability", true),
 		chromedp.Flag("disable-component-update", true),

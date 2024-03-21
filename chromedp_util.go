@@ -11,11 +11,19 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+var blockedUrls = [...]string{
+	"*.css*",
+	"*bootstrap-autofill-overlay.js*",
+	"*alpine.js*",
+	"*livewire.js*",
+	"*unit3d.js*",
+	"*virtual-select.js*",
+}
+
 func reloadChatPage(ctx context.Context, roomId, logLine string) {
 	refreshedPage.Set(1)
 	chatVisibilityTasks := getChatVisibilityBrowserTask(roomId)
 	log.Println(logLine)
-	blockedUrls := [...]string{"*.css"}
 	go chromedp.RunResponse(ctx,
 		network.Enable(),
 		network.SetBlockedURLS(blockedUrls[:]),
@@ -26,7 +34,6 @@ func reloadChatPage(ctx context.Context, roomId, logLine string) {
 // login to the webpage and click system chat box
 func loginAndNavigate(url, username, password, roomId, totpKey string) chromedp.Tasks {
 	// retrieve cookies
-	blockedUrls := [...]string{"*.css"}
 	cookieTasks := chromedp.Tasks{chromedp.ActionFunc(func(ctx context.Context) error {
 		cookies, err := network.GetCookies().Do(ctx)
 		c := make([]string, len(cookies))
@@ -86,6 +93,7 @@ func loginAndNavigate(url, username, password, roomId, totpKey string) chromedp.
 
 func getChatVisibilityBrowserTask(roomId string) chromedp.Tasks {
 	return chromedp.Tasks{
+		chromedp.Evaluate("document.querySelectorAll('svg').forEach(e => e.remove());", nil), // remove svg animations, lowers cpu
 		// wait for chat to be visible
 		chromedp.WaitVisible(`//*[@id="chatbody"]`, chromedp.BySearch),
 		chromedp.Click(fmt.Sprintf(`#frameTabs > div:nth-child(1) > ul > li:nth-child(%s) > a`, roomId), chromedp.ByQuery),
