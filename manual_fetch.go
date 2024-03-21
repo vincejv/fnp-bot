@@ -14,22 +14,23 @@ import (
 )
 
 type PageItem struct {
-	TorrentId   int64
-	Name        string
-	Size        string
-	CreatedDate time.Time
-	Category    string
-	Type        string
-	Uploader    string
-	URL         string
-	Featured    bool
-	RawLine     string
+	TorrentId    int64
+	Name         string
+	Size         string
+	CreatedDate  time.Time
+	UploadedDate time.Time
+	Category     string
+	Type         string
+	Uploader     string
+	URL          string
+	Featured     bool
+	RawLine      string
 }
 
 type FetchFilter func(PageItem) bool
 
 // Manual fetch for fetching missed items when websocket is temporarily dropped or disconnected
-func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilter, irc *ircevent.Connection) {
+func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilter, irc *ircevent.Connection, announceFmt string) {
 	// Request the HTML page.
 	url := fmt.Sprintf("%s/torrents?perPage=%s%s", fetchSiteBaseUrl, fetchNoItems, addtlQuery)
 	log.Println("Fetching possible missed items due to WS Closing")
@@ -70,6 +71,9 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 		url := fmt.Sprintf("%s/torrents/%d", fetchSiteBaseUrl, torrentId)
 		title := strings.TrimSpace(s.Find("a.torrent-search--list__name").Text())
 		uploader := strings.TrimSpace(s.Find("span.torrent-search--list__uploader").Text())
+		layout := "2006-01-02 15:04:05"
+		uploadTimeStr := s.Find("td.torrent-search--list__age time").AttrOr("datetime", layout)
+		uploadTime, _ := time.Parse(layout, uploadTimeStr)
 		featured := false
 		if s.Find("i.torrent-icons__featured").Length() > 0 {
 			featured = true
@@ -82,11 +86,12 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 
 		size := strings.TrimSpace(s.Find("td.torrent-search--list__size").Text())
 		// Category, type, name, size, uploader, url
-		announceLine := fmt.Sprintf(announceLineFmt, getCategoryFriendlyStr(categoryId), getTypeFriendlyStr(typeId), title, size, uploader, url)
+		announceLine := fmt.Sprintf(announceFmt, getCategoryFriendlyStr(categoryId), getTypeFriendlyStr(typeId), title, size, uploader, url)
 
 		// Store fetched torrents temporarily for processing
 		announceDoc := PageItem{TorrentId: torrentId, Name: title, Size: size, Category: getCategoryFriendlyStr(categoryId),
-			Type: getTypeFriendlyStr(typeId), Uploader: uploader, URL: url, Featured: featured, RawLine: announceLine, CreatedDate: time.Now()}
+			Type: getTypeFriendlyStr(typeId), Uploader: uploader, URL: url, Featured: featured, RawLine: announceLine, CreatedDate: time.Now(),
+			UploadedDate: uploadTime}
 		if filter(announceDoc) {
 			fetchedTors = append(fetchedTors, announceDoc)
 		}
