@@ -15,7 +15,7 @@ func reloadChatPage(ctx context.Context, roomId, logLine string) {
 	refreshedPage.Set(1)
 	chatVisibilityTasks := getChatVisibilityBrowserTask(roomId)
 	log.Println(logLine)
-	go chromedp.RunResponse(ctx, network.Enable(), chromedp.Reload(), chatVisibilityTasks)
+	go chromedp.RunResponse(ctx, chromedp.Reload(), chatVisibilityTasks)
 }
 
 // login to the webpage and click system chat box
@@ -38,7 +38,6 @@ func loginAndNavigate(url, username, password, roomId, totpKey string) chromedp.
 
 	// login to the site using username and password
 	loginTasks := chromedp.Tasks{
-		network.Enable(),
 		chromedp.Navigate(url),
 		chromedp.Sleep(2 * time.Second),
 

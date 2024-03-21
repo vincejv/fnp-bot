@@ -52,6 +52,7 @@ func main() {
 	log.Println("Starting browser")
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
+		chromedp.Flag("disable-gpu", false),
 		//chromedp.Flag("headless", false),
 	)
 
