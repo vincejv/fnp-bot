@@ -190,6 +190,8 @@ func logSettings() {
 	log.Printf("Enable SASL: %s\n", enableSasl)
 	log.Printf("Site base url for fetching: %s\n", fetchSiteBaseUrl)
 	log.Printf("Announce line format: %s\n", announceLineFmt)
+	log.Printf("Featured Announce line format: %s\n", featureLineFmt)
+	log.Printf("Freeleech Announce line format: %s\n", freeleechLineFmt)
 	log.Printf("UNIT3D Bot name: %s\n", unit3dBotName)
 	log.Printf("UNIT3D Room id: %s\n", roomId)
 	log.Printf("Site Username: %s\n", siteUsername)
