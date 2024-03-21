@@ -53,6 +53,9 @@ func main() {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
 		chromedp.Flag("disable-gpu", false),
+		chromedp.Flag("blink-settings", "imagesEnabled=false"),
+		chromedp.Flag("disable-domain-reliability", true),
+		chromedp.Flag("disable-component-update", true),
 		//chromedp.Flag("headless", false),
 	)
 

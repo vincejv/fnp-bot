@@ -15,12 +15,18 @@ func reloadChatPage(ctx context.Context, roomId, logLine string) {
 	refreshedPage.Set(1)
 	chatVisibilityTasks := getChatVisibilityBrowserTask(roomId)
 	log.Println(logLine)
-	go chromedp.RunResponse(ctx, chromedp.Reload(), chatVisibilityTasks)
+	blockedUrls := [...]string{"*.css"}
+	go chromedp.RunResponse(ctx,
+		network.Enable(),
+		network.SetBlockedURLS(blockedUrls[:]),
+		chromedp.Reload(),
+		chatVisibilityTasks)
 }
 
 // login to the webpage and click system chat box
 func loginAndNavigate(url, username, password, roomId, totpKey string) chromedp.Tasks {
 	// retrieve cookies
+	blockedUrls := [...]string{"*.css"}
 	cookieTasks := chromedp.Tasks{chromedp.ActionFunc(func(ctx context.Context) error {
 		cookies, err := network.GetCookies().Do(ctx)
 		c := make([]string, len(cookies))
@@ -38,6 +44,8 @@ func loginAndNavigate(url, username, password, roomId, totpKey string) chromedp.
 
 	// login to the site using username and password
 	loginTasks := chromedp.Tasks{
+		network.Enable(),
+		network.SetBlockedURLS(blockedUrls[:]),
 		chromedp.Navigate(url),
 		chromedp.Sleep(2 * time.Second),
 
