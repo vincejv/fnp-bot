@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -19,6 +20,7 @@ const (
 	OTHER_ANNOUNCE
 	IGNORE_ANNOUNCE
 	FREELEECH_ANNOUNCE
+	USER_MESSAGE
 )
 
 // Parser function types
@@ -120,7 +122,7 @@ func (m *WebsocketMessage) parseSocketMsg(payload, roomId string) error {
 
 func (m *WebsocketMessage) isBotName(name string) bool {
 	// check for correct user
-	return m.Message.Bot.Name == name
+	return m.Message.Bot.Name == name || m.Message.User.Username == "System" || m.Message.User.Username == unit3dBotName
 }
 
 func (m *WebsocketMessage) isSubtitle() bool {
@@ -142,7 +144,7 @@ func (m *WebsocketMessage) isFreeleechAnnounce() bool {
 // Determine announce type
 func (m *WebsocketMessage) determineType(botname string) int {
 	if !m.isBotName(botname) {
-		return IGNORE_ANNOUNCE // ignore chat messages not from Bot user
+		return USER_MESSAGE // ignore chat messages not from Bot user
 	}
 
 	if m.isFeaturedAnnounce() {
@@ -214,6 +216,37 @@ func (m *WebsocketMessage) parseTorrentId(url string) int {
 	matches := urlRegx.FindStringSubmatch(url)
 	tId, _ := strconv.Atoi(matches[2])
 	return tId
+}
+
+func cleanHTML(input string) string {
+	// Replace HTML entities with their respective characters
+	cleaned := html.UnescapeString(input)
+
+	// Remove HTML tags
+	re := regexp.MustCompile(`<[^>]*>`)
+	cleaned = re.ReplaceAllString(cleaned, "")
+
+	// Remove BBCode tags
+	re = regexp.MustCompile(`\[(.*?)\]`)
+	cleaned = re.ReplaceAllString(cleaned, "")
+
+	// Preserve emojis
+	re = regexp.MustCompile(`[\x{1F600}-\x{1F64F}]|[\x{1F300}-\x{1F5FF}]|[\x{1F680}-\x{1F6FF}]|[\x{1F1E0}-\x{1F1FF}]|[\x{2600}-\x{26FF}]|[\x{2700}-\x{27BF}]`)
+	cleaned = re.ReplaceAllStringFunc(cleaned, func(match string) string {
+		return match
+	})
+
+	return cleaned
+}
+
+// Parse regular announce, that contains uploader and categories in the announce message itself
+func (m *WebsocketMessage) parseUserMessage(baseUrl, apiKey string) *Announce {
+	a := &Announce{}
+
+	a.Uploader = m.Message.User.Username
+	a.RawLine = cleanHTML(m.Message.Message)
+
+	return a
 }
 
 // Parse regular announce, that contains uploader and categories in the announce message itself

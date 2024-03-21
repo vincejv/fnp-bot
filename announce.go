@@ -15,6 +15,7 @@ type Announce struct {
 	Freeleech    string
 	DoubleUpload string
 	Internal     string
+	RawLine      string
 }
 
 func (a Announce) String() string {

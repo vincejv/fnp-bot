@@ -6,11 +6,14 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 	"github.com/ergochat/irc-go/ircevent"
+	"github.com/ergochat/irc-go/ircfmt"
 	"github.com/ergochat/irc-go/ircmsg"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pquerna/otp/totp"
@@ -28,9 +31,7 @@ var fetchNoItems = getEnv("FETCH_NO_OF_ITEMS", "25") // For manual fetching
 var fetchSiteBaseUrl = getEnv("FETCH_BASE_URL", "https://site.com")
 var enableSSL = getEnv("ENABLE_SSL", "True")
 var enableSasl = getEnv("ENABLE_SASL", "False")
-var announceLineFmt = getEnv("ANNOUNCE_LINE_FMT", "Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]")
-var featureLineFmt = getEnv("FEATURE_LINE_FMT", "NOW FEATURING!! Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]")
-var freeleechLineFmt = getEnv("FREELEECH_LINE_FMT", "FREELEECH TORRENT!! Cat [%s] Type [%s] Name [%s] Size [%s] Uploader [%s] Url [%s]")
+var userLineFmt = getEnv("USER_MSG_LINE_FMT", "[Chatbox] > %s: %s")
 var siteUsername = getEnv("SITE_USERNAME", "")
 var sitePassword = getEnv("SITE_PASSWORD", "")
 var totpToken = getEnv("SITE_TOTP_TOKEN", "")
@@ -42,7 +43,7 @@ type FormatterFunc func(*Announce) string
 
 func main() {
 	flag.Parse()
-	log.Print("Starting FNP Announcebot")
+	log.Print("Starting FNP Chat bridge")
 	logSettings()
 	initMutex()
 
@@ -55,11 +56,11 @@ func main() {
 		chromedp.NoFirstRun,
 		chromedp.WSURLReadTimeout(time.Second*30),
 		chromedp.Flag("no-zygote", true),
-		chromedp.Flag("single-process", true),
+		//chromedp.Flag("single-process", true),
 		chromedp.Flag("blink-settings", "imagesEnabled=false"),
 		chromedp.Flag("disable-domain-reliability", true),
 		chromedp.Flag("disable-component-update", true),
-		//chromedp.Flag("headless", false),
+		chromedp.Flag("headless", false),
 	)
 
 	// Prepare browser context
@@ -68,6 +69,18 @@ func main() {
 
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
+
+	irc.AddCallback("PRIVMSG", func(m ircmsg.Message) {
+		channel := m.Params[0]
+		ircNick := m.Nick()
+		ircMsg := ircfmt.Strip(m.Params[1])
+		if channel == ircChannel && ircNick == unit3dBotName {
+			go chromedp.RunResponse(ctx,
+				chromedp.SetValue(`//*[@id="chat-message"]`, ircMsg, chromedp.BySearch),
+				chromedp.SendKeys(`//*[@id="chat-message"]`, kb.Enter, chromedp.BySearch),
+			)
+		}
+	})
 
 	go startBrowser(ctx, irc)
 
@@ -79,13 +92,19 @@ func main() {
 }
 
 func waitAndReload(ctx context.Context, timeout int) {
+	log.Printf("Waiting for handshake, timeout is %ds, reload if not acknowledged\n", timeout)
 	for timeout > 0 {
 		// poll and check every 1 sec if ws is already established
 		time.Sleep(1 * time.Second)
 		timeout = timeout - 1
-		if wsHandshake.Get() != 0 {
+		if wsHandshake.IsFlagged() {
 			// ws NOW acknowledged, no need to refresh page
 			return
+		}
+		if interruptWnR.IsFlagged() {
+			interruptWnR.Reset()
+			go reloadChatPage(ctx, roomId, "WS possibly closed, and interrupted waitAndReload, reloading page")
+			return // interrupts wait
 		}
 	}
 	go reloadChatPage(ctx, roomId, "WS not acknowledged, reloading page")
@@ -97,18 +116,18 @@ func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
 		case *network.EventWebSocketCreated:
-			wsHandshake.Set(0)
-			log.Printf("Page loaded, create websocket connection, waiting for handshake, timeout is 15s, reload if not acknowledged")
-			if refreshedPage.Get() == 1 {
+			wsHandshake.Reset()
+			log.Printf("Page loaded, create websocket connection")
+			if refreshedPage.IsFlagged() {
 				// paged refresh due to WS Closing
-				refreshedPage.Set(0)
-				go performManualFetch(irc)
+				refreshedPage.Reset()
+				//go performManualFetch(irc)
 			} else {
 				log.Println("Intial WS connection created")
 			}
 			go waitAndReload(ctx, 15)
 		case *network.EventWebSocketHandshakeResponseReceived:
-			wsHandshake.Set(1)
+			wsHandshake.Flag()
 			log.Printf("Handshake acknowledged, connection established")
 		case *network.EventWebSocketFrameReceived:
 			payload := ev.Response.PayloadData
@@ -125,17 +144,22 @@ func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 				log.Printf("could not parse websocket message: %v err: %v", payload, err)
 				break
 			}
-			announceType := p.determineType(unit3dBotName)
-			if announceType == UPLOAD_ANNOUNCE {
-				go processAnnounce(irc, lastItemId, p.parseAnnounce, formatAnnounceStr)
-			} else if announceType == FEATURE_ANNOUNCE {
-				go processAnnounce(irc, lastFeatId, p.parseSparseAnnounce, formatFeatureStr)
-			} else if announceType == FREELEECH_ANNOUNCE {
-				go processAnnounce(irc, lastFLId, p.parseSparseAnnounce, formatFreeleechStr)
+			if strings.Contains(payload, "new.message") { // only new message will be processed
+				announceType := p.determineType(unit3dBotName)
+				if announceType == USER_MESSAGE {
+					go processAnnounce(irc, lastItemId, p.parseUserMessage, formatUserMsgStr)
+				}
 			}
 		case *network.EventWebSocketFrameError:
 		case *network.EventWebSocketClosed:
-			go reloadChatPage(ctx, roomId, "WS closed/errored, reloading page")
+			interruptWnR.Flag() // send interrupt on either scenarios to reset PING/PONG watchdog
+			if !wsHandshake.IsFlagged() {
+				// handshake watchdog is running, use that to reloa dpage
+				log.Println("Send handshake watchdog interrupt, for page reload, wait until it reloads")
+			} else {
+				// no handshake watchdog, reloading here directly
+				go reloadChatPage(ctx, roomId, "WS closed/errored, reloading page")
+			}
 		}
 	})
 	if err := chromedp.Run(ctx, loginAndNavigate(fetchSiteBaseUrl, siteUsername, sitePassword, roomId, totpToken)); err != nil {
@@ -144,10 +168,14 @@ func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 	<-gotException
 }
 
+func isWhitespace(str string) bool {
+	return strings.TrimSpace(str) == ""
+}
+
 func processAnnounce(irc *ircevent.Connection, itemId *ItemIdCtr, parserFn ParserFunc, formatFn FormatterFunc) {
 	a := parserFn(fetchSiteBaseUrl, siteApiKey)
 	announceString := formatFn(a)
-	if announceString != "" {
+	if announceString != "" && !isWhitespace(a.RawLine) {
 		log.Printf("Announcing to IRC: %v\n", announceString)
 		go irc.Privmsg(ircChannel, announceString)
 	}
@@ -155,35 +183,35 @@ func processAnnounce(irc *ircevent.Connection, itemId *ItemIdCtr, parserFn Parse
 }
 
 // Checks for missed announce items
-func performManualFetch(irc *ircevent.Connection) {
-	log.Println("Checking for missed items")
-	// only fetch 10 minute old items
-	timeFilter := func(item PageItem) bool {
-		thresh := time.Now().Add(-10 * time.Minute)
-		return item.UploadedDate.After(thresh)
-	}
-	if lastItemId.Get() != -1 {
-		go fetchTorPage(cookieJar.Get(), "", lastItemId, timeFilter, irc, announceLineFmt)
-	} else {
-		log.Println("No manual fetch for uploads necessary")
-	}
-	if lastFeatId.Get() != -1 {
-		go fetchTorPage(cookieJar.Get(), "&featured=true", lastFeatId, timeFilter, irc, featureLineFmt)
-	} else {
-		log.Println("No manual fetch for featuring items necessary")
-	}
-	if lastFLId.Get() != -1 {
-		go fetchTorPage(cookieJar.Get(), "&free[0]=100", lastFLId,
-			func(item PageItem) bool {
-				// only fetch 10 minute old items
-				thresh := time.Now().Add(-10 * time.Minute)
-				return !item.Featured && item.UploadedDate.After(thresh)
-			},
-			irc, freeleechLineFmt)
-	} else {
-		log.Println("No manual fetch for FL items necessary")
-	}
-}
+// func performManualFetch(irc *ircevent.Connection) {
+// 	log.Println("Checking for missed items")
+// 	// only fetch 10 minute old items
+// 	timeFilter := func(item PageItem) bool {
+// 		thresh := time.Now().Add(-10 * time.Minute)
+// 		return item.UploadedDate.After(thresh)
+// 	}
+// 	if lastItemId.Get() != -1 {
+// 		go fetchTorPage(cookieJar.Get(), "", lastItemId, timeFilter, irc, announceLineFmt)
+// 	} else {
+// 		log.Println("No manual fetch for uploads necessary")
+// 	}
+// 	if lastFeatId.Get() != -1 {
+// 		go fetchTorPage(cookieJar.Get(), "&featured=true", lastFeatId, timeFilter, irc, featureLineFmt)
+// 	} else {
+// 		log.Println("No manual fetch for featuring items necessary")
+// 	}
+// 	if lastFLId.Get() != -1 {
+// 		go fetchTorPage(cookieJar.Get(), "&free[0]=100", lastFLId,
+// 			func(item PageItem) bool {
+// 				// only fetch 10 minute old items
+// 				thresh := time.Now().Add(-10 * time.Minute)
+// 				return !item.Featured && item.UploadedDate.After(thresh)
+// 			},
+// 			irc, freeleechLineFmt)
+// 	} else {
+// 		log.Println("No manual fetch for FL items necessary")
+// 	}
+// }
 
 func logSettings() {
 	log.Println("Environment settings:")
@@ -195,9 +223,7 @@ func logSettings() {
 	log.Printf("Enable SSL: %s\n", enableSSL)
 	log.Printf("Enable SASL: %s\n", enableSasl)
 	log.Printf("Site base url for fetching: %s\n", fetchSiteBaseUrl)
-	log.Printf("Announce line format: %s\n", announceLineFmt)
-	log.Printf("Featured Announce line format: %s\n", featureLineFmt)
-	log.Printf("Freeleech Announce line format: %s\n", freeleechLineFmt)
+	log.Printf("User chat line format: %s\n", userLineFmt)
 	log.Printf("UNIT3D Bot name: %s\n", unit3dBotName)
 	log.Printf("UNIT3D Room id: %s\n", roomId)
 	log.Printf("Site Username: %s\n", siteUsername)

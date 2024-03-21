@@ -21,7 +21,8 @@ var blockedUrls = [...]string{
 }
 
 func reloadChatPage(ctx context.Context, roomId, logLine string) {
-	refreshedPage.Set(1)
+	interruptWSPong.Flag()
+	refreshedPage.Flag()
 	chatVisibilityTasks := getChatVisibilityBrowserTask(roomId)
 	log.Println(logLine)
 	go chromedp.RunResponse(ctx,
@@ -96,6 +97,9 @@ func getChatVisibilityBrowserTask(roomId string) chromedp.Tasks {
 		chromedp.Evaluate("document.querySelectorAll('svg').forEach(e => e.remove());", nil), // remove svg animations, lowers cpu
 		// wait for chat to be visible
 		chromedp.WaitVisible(`//*[@id="chatbody"]`, chromedp.BySearch),
+		chromedp.Sleep(5 * time.Second),
+		chromedp.Click(fmt.Sprintf(`#frameTabs > div:nth-child(1) > ul > li:nth-child(%s) > a`, roomId), chromedp.ByQuery),
+		chromedp.Sleep(5 * time.Second),
 		chromedp.Click(fmt.Sprintf(`#frameTabs > div:nth-child(1) > ul > li:nth-child(%s) > a`, roomId), chromedp.ByQuery),
 	}
 }
