@@ -35,6 +35,12 @@ var wsHandshake = new(ItemIdCtr)
 // Ping Pong watchdog timer
 var pingPongWatchdog = new(ItemIdCtr)
 
+// interrupts wait and reload for handshake
+var interruptWnR = new(ItemIdCtr)
+
+// interrupts PONG check and trickle
+var interruptWSPong = new(ItemIdCtr)
+
 func initMutex() {
 	lastItemId.Set(-1)
 	lastFeatId.Set(-1)
@@ -47,6 +53,18 @@ func (m *ItemIdCtr) Get() int64 {
 	m.RLock()
 	defer m.RUnlock()
 	return m.me
+}
+
+func (m *ItemIdCtr) IsFlagged() bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.me > 0
+}
+
+func (m *ItemIdCtr) Flag() {
+	m.Lock()
+	m.me = 1
+	m.Unlock()
 }
 
 func (m *ItemIdCtr) Set(me int64) {

@@ -21,6 +21,7 @@ var blockedUrls = [...]string{
 }
 
 func reloadChatPage(ctx context.Context, roomId, logLine string) {
+	interruptWSPong.Flag()
 	refreshedPage.Set(1)
 	chatVisibilityTasks := getChatVisibilityBrowserTask(roomId)
 	log.Println(logLine)

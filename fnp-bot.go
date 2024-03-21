@@ -79,13 +79,19 @@ func main() {
 }
 
 func waitAndReload(ctx context.Context, timeout int) {
+	log.Printf("Waiting for handshake, timeout is %ds, reload if not acknowledged\n", timeout)
 	for timeout > 0 {
 		// poll and check every 1 sec if ws is already established
 		time.Sleep(1 * time.Second)
 		timeout = timeout - 1
-		if wsHandshake.Get() != 0 {
+		if wsHandshake.IsFlagged() {
 			// ws NOW acknowledged, no need to refresh page
 			return
+		}
+		if interruptWnR.IsFlagged() {
+			interruptWnR.Reset()
+			go reloadChatPage(ctx, roomId, "WS possibly closed, and interrupted waitAndReload, reloading page")
+			return // interrupts wait
 		}
 	}
 	go reloadChatPage(ctx, roomId, "WS not acknowledged, reloading page")
@@ -97,11 +103,11 @@ func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		switch ev := ev.(type) {
 		case *network.EventWebSocketCreated:
-			wsHandshake.Set(0)
-			log.Printf("Page loaded, create websocket connection, waiting for handshake, timeout is 15s, reload if not acknowledged")
-			if refreshedPage.Get() == 1 {
+			wsHandshake.Reset()
+			log.Printf("Page loaded, create websocket connection")
+			if refreshedPage.IsFlagged() {
 				// paged refresh due to WS Closing
-				refreshedPage.Set(0)
+				refreshedPage.Reset()
 				go performManualFetch(irc)
 			} else {
 				log.Println("Intial WS connection created")
@@ -135,7 +141,14 @@ func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 			}
 		case *network.EventWebSocketFrameError:
 		case *network.EventWebSocketClosed:
-			go reloadChatPage(ctx, roomId, "WS closed/errored, reloading page")
+			interruptWnR.Flag() // send interrupt on either scenarios to reset PING/PONG watchdog
+			if !wsHandshake.IsFlagged() {
+				// handshake watchdog is running, use that to reloa dpage
+				log.Println("Send handshake watchdog interrupt, for page reload, wait until it reloads")
+			} else {
+				// no handshake watchdog, reloading here directly
+				go reloadChatPage(ctx, roomId, "WS closed/errored, reloading page")
+			}
 		}
 	})
 	if err := chromedp.Run(ctx, loginAndNavigate(fetchSiteBaseUrl, siteUsername, sitePassword, roomId, totpToken)); err != nil {

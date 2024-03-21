@@ -9,14 +9,14 @@ import (
 var wsWatchdogTimerInitVal = 35 // 35 seconds
 
 func wsWatchdog(ctx context.Context, roomId string) {
-	log.Println("Starting WS Watchdog")
+	log.Println("Resetting WS Watchdog")
 	wsWatchdogTimer := wsWatchdogTimerInitVal
 	for wsWatchdogTimer > 0 {
 		// poll and check every 1 sec if ws is already established
 		time.Sleep(1 * time.Second)
 		wsWatchdogTimer = wsWatchdogTimer - 1
-		if pingPongWatchdog.Get() >= 1 {
-			// ws Got Ponged
+		if pingPongWatchdog.IsFlagged() || interruptWSPong.IsFlagged() { // also reset of interrupted
+			interruptWSPong.Reset()
 			pingPongWatchdog.Reset()
 			wsWatchdogTimer = wsWatchdogTimerInitVal // trickle to initVal
 		}
