@@ -60,7 +60,7 @@ func main() {
 		chromedp.Flag("blink-settings", "imagesEnabled=false"),
 		chromedp.Flag("disable-domain-reliability", true),
 		chromedp.Flag("disable-component-update", true),
-		chromedp.Flag("headless", false),
+		//chromedp.Flag("headless", false),
 	)
 
 	// Prepare browser context
@@ -121,7 +121,7 @@ func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 			if refreshedPage.IsFlagged() {
 				// paged refresh due to WS Closing
 				refreshedPage.Reset()
-				//go performManualFetch(irc)
+				performManualFetch(irc)
 			} else {
 				log.Println("Intial WS connection created")
 			}
@@ -147,7 +147,7 @@ func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 			if strings.Contains(payload, "new.message") { // only new message will be processed
 				announceType := p.determineType(unit3dBotName)
 				if announceType == USER_MESSAGE {
-					go processAnnounce(irc, lastItemId, p.parseUserMessage, formatUserMsgStr)
+					processAnnounce(irc, lastItemId, p.parseUserMessage, formatUserMsgStr) // process sequentially
 				}
 			}
 		case *network.EventWebSocketFrameError:
@@ -177,41 +177,25 @@ func processAnnounce(irc *ircevent.Connection, itemId *ItemIdCtr, parserFn Parse
 	announceString := formatFn(a)
 	if announceString != "" && !isWhitespace(a.RawLine) {
 		log.Printf("Announcing to IRC: %v\n", announceString)
-		go irc.Privmsg(ircChannel, announceString)
+		irc.Privmsg(ircChannel, announceString)
 	}
 	itemId.Set(a.Id)
 }
 
 // Checks for missed announce items
-// func performManualFetch(irc *ircevent.Connection) {
-// 	log.Println("Checking for missed items")
-// 	// only fetch 10 minute old items
-// 	timeFilter := func(item PageItem) bool {
-// 		thresh := time.Now().Add(-10 * time.Minute)
-// 		return item.UploadedDate.After(thresh)
-// 	}
-// 	if lastItemId.Get() != -1 {
-// 		go fetchTorPage(cookieJar.Get(), "", lastItemId, timeFilter, irc, announceLineFmt)
-// 	} else {
-// 		log.Println("No manual fetch for uploads necessary")
-// 	}
-// 	if lastFeatId.Get() != -1 {
-// 		go fetchTorPage(cookieJar.Get(), "&featured=true", lastFeatId, timeFilter, irc, featureLineFmt)
-// 	} else {
-// 		log.Println("No manual fetch for featuring items necessary")
-// 	}
-// 	if lastFLId.Get() != -1 {
-// 		go fetchTorPage(cookieJar.Get(), "&free[0]=100", lastFLId,
-// 			func(item PageItem) bool {
-// 				// only fetch 10 minute old items
-// 				thresh := time.Now().Add(-10 * time.Minute)
-// 				return !item.Featured && item.UploadedDate.After(thresh)
-// 			},
-// 			irc, freeleechLineFmt)
-// 	} else {
-// 		log.Println("No manual fetch for FL items necessary")
-// 	}
-// }
+func performManualFetch(irc *ircevent.Connection) {
+	log.Println("Checking for missed chats")
+	// only fetch 10 minute old items
+	timeFilter := func(item PageItem) bool {
+		thresh := time.Now().UTC().Add(-10 * time.Minute)
+		return item.CreatedAt.After(thresh)
+	}
+	if lastItemId.Get() != -1 {
+		fetchTorPage(cookieJar.Get(), "", lastItemId, timeFilter, irc, userLineFmt)
+	} else {
+		log.Println("No manual fetch for chat necessary")
+	}
+}
 
 func logSettings() {
 	log.Println("Environment settings:")
@@ -219,7 +203,6 @@ func logSettings() {
 	log.Printf("Bot nickname: %s\n", nick)
 	log.Printf("IRC Announce channel: %s\n", ircChannel)
 	log.Printf("IRC Password: %s\n", "*******") // ircPassword masked for safety
-	log.Printf("Number of items to fetch on manual pull: %s\n", fetchNoItems)
 	log.Printf("Enable SSL: %s\n", enableSSL)
 	log.Printf("Enable SASL: %s\n", enableSasl)
 	log.Printf("Site base url for fetching: %s\n", fetchSiteBaseUrl)

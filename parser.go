@@ -219,24 +219,37 @@ func (m *WebsocketMessage) parseTorrentId(url string) int {
 }
 
 func cleanHTML(input string) string {
-	// Replace HTML entities with their respective characters
-	cleaned := html.UnescapeString(input)
+	// Unescape HTML entities
+	input = html.UnescapeString(input)
 
-	// Remove HTML tags
-	re := regexp.MustCompile(`<[^>]*>`)
-	cleaned = re.ReplaceAllString(cleaned, "")
+	// Regular expression to match both HTML tags and BBCode
+	re := regexp.MustCompile(`\[.*?\]|\[\/.*?\]|<[^>]*>`)
 
-	// Remove BBCode tags
-	re = regexp.MustCompile(`\[(.*?)\]`)
-	cleaned = re.ReplaceAllString(cleaned, "")
-
-	// Preserve emojis
-	re = regexp.MustCompile(`[\x{1F600}-\x{1F64F}]|[\x{1F300}-\x{1F5FF}]|[\x{1F680}-\x{1F6FF}]|[\x{1F1E0}-\x{1F1FF}]|[\x{2600}-\x{26FF}]|[\x{2700}-\x{27BF}]`)
-	cleaned = re.ReplaceAllStringFunc(cleaned, func(match string) string {
-		return match
+	// Replace HTML tags and BBCode with empty string
+	output := re.ReplaceAllStringFunc(input, func(match string) string {
+		// Check if it's an image tag
+		if strings.HasPrefix(match, "<img ") {
+			// Extract alt text from the image tag
+			altText := extractAltText(match)
+			return altText
+		}
+		// For other tags, just replace with empty string
+		return ""
 	})
 
-	return cleaned
+	return output
+}
+
+func extractAltText(imgTag string) string {
+	// Regular expression to extract alt text from the image tag
+	re := regexp.MustCompile(`alt="(.*?)"`)
+	match := re.FindStringSubmatch(imgTag)
+	if len(match) >= 2 {
+		// If alt text is found, return it
+		return match[1]
+	}
+	// If alt text is not found, return empty string
+	return ""
 }
 
 // Parse regular announce, that contains uploader and categories in the announce message itself
