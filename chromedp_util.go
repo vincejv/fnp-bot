@@ -22,7 +22,7 @@ var blockedUrls = [...]string{
 
 func reloadChatPage(ctx context.Context, roomId, logLine string) {
 	interruptWSPong.Flag()
-	refreshedPage.Set(1)
+	refreshedPage.Flag()
 	chatVisibilityTasks := getChatVisibilityBrowserTask(roomId)
 	log.Println(logLine)
 	go chromedp.RunResponse(ctx,
@@ -94,9 +94,12 @@ func loginAndNavigate(url, username, password, roomId, totpKey string) chromedp.
 
 func getChatVisibilityBrowserTask(roomId string) chromedp.Tasks {
 	return chromedp.Tasks{
-		chromedp.Evaluate("document.querySelectorAll('svg').forEach(e => e.remove());", nil), // remove svg animations, lowers cpu
+		chromedp.Evaluate("document.querySelectorAll('svg').forEach(e => e.remove());document.querySelector('#frame > div > div.messages > ul')", nil), // remove svg animations, lowers cpu
 		// wait for chat to be visible
 		chromedp.WaitVisible(`//*[@id="chatbody"]`, chromedp.BySearch),
+		chromedp.Sleep(5 * time.Second),
+		chromedp.Click(fmt.Sprintf(`#frameTabs > div:nth-child(1) > ul > li:nth-child(%s) > a`, roomId), chromedp.ByQuery),
+		chromedp.Sleep(5 * time.Second),
 		chromedp.Click(fmt.Sprintf(`#frameTabs > div:nth-child(1) > ul > li:nth-child(%s) > a`, roomId), chromedp.ByQuery),
 	}
 }

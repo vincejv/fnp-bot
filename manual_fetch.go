@@ -32,6 +32,7 @@ type FetchFilter func(PageItem) bool
 // Manual fetch for fetching missed items when websocket is temporarily dropped or disconnected
 func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilter, irc *ircevent.Connection, announceFmt string) {
 	// Request the HTML page.
+	time.Sleep(5 * time.Second) // artificially sleep by 5 seconds
 	url := fmt.Sprintf("%s/torrents?perPage=%s%s", fetchSiteBaseUrl, fetchNoItems, addtlQuery)
 	log.Println("Fetching possible missed items due to WS Closing")
 	log.Println(url)
@@ -48,7 +49,10 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		log.Printf("Http error: %d\n", res.StatusCode)
+		log.Printf("Http error: %d, retrying\n", res.StatusCode)
+		time.Sleep(5 * time.Second)
+		fetchTorPage(cookie, addtlQuery, lastId, filter, irc, announceFmt)
+		return
 	}
 
 	// Load the HTML document
@@ -94,6 +98,8 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 			UploadedDate: uploadTime}
 		if filter(announceDoc) {
 			fetchedTors = append(fetchedTors, announceDoc)
+		} else {
+			log.Println("Not announcing, item doesn't pass filter: " + announceDoc.RawLine)
 		}
 	})
 
@@ -108,6 +114,8 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 			log.Println("Missed item: " + tor.RawLine)
 			go irc.Privmsg(ircChannel, tor.RawLine)
 			lastId.Set(tor.TorrentId)
+		} else {
+			log.Println("Not announcing, item already announced: " + tor.RawLine)
 		}
 	}
 }

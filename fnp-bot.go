@@ -55,7 +55,7 @@ func main() {
 		chromedp.NoFirstRun,
 		chromedp.WSURLReadTimeout(time.Second*30),
 		chromedp.Flag("no-zygote", true),
-		chromedp.Flag("single-process", true),
+		//chromedp.Flag("single-process", true),
 		chromedp.Flag("blink-settings", "imagesEnabled=false"),
 		chromedp.Flag("disable-domain-reliability", true),
 		chromedp.Flag("disable-component-update", true),
