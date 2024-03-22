@@ -216,7 +216,7 @@ func performManualFetch(irc *ircevent.Connection) {
 		// only fetch 10 minute old items
 		timeFilter := func(item PageItem) bool {
 			thresh := time.Now().UTC().Add(-10 * time.Minute)
-			return item.CreatedAt.After(thresh)
+			return item.CreatedAt.After(thresh) && item.User.Username != unit3dBotName
 		}
 		if lastItemId.Get() != -1 {
 			fetchTorPage(cookieJar.Get(), "", lastItemId, timeFilter, irc, userLineFmt)
@@ -239,7 +239,7 @@ func logSettings() {
 	log.Printf("Enable SASL: %s\n", enableSasl)
 	log.Printf("Site base url for fetching: %s\n", fetchSiteBaseUrl)
 	log.Printf("User chat line format: %s\n", userLineFmt)
-	log.Printf("UNIT3D Bot name: %s\n", unit3dBotName)
+	log.Printf("UNIT3D Bot name: %s\n", unit3dBotName) // site username, prevent duplication of msgs, and the account that pushes the msg to the chatbox
 	log.Printf("UNIT3D Room id: %s\n", roomId)
 	log.Printf("Site Username: %s\n", siteUsername)
 	log.Printf("Site Password: %s\n", "*******") // masked for safety
