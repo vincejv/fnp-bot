@@ -172,7 +172,7 @@ func performManualFetch(irc *ircevent.Connection) {
 	log.Println("Checking for missed items")
 	// only fetch 10 minute old items
 	timeFilter := func(item PageItem) bool {
-		thresh := time.Now().Add(-10 * time.Minute)
+		thresh := time.Now().UTC().Add(-10 * time.Minute)
 		return item.UploadedDate.After(thresh)
 	}
 	if lastItemId.Get() != -1 {
@@ -189,7 +189,7 @@ func performManualFetch(irc *ircevent.Connection) {
 		go fetchTorPage(cookieJar.Get(), "&free[0]=100", lastFLId,
 			func(item PageItem) bool {
 				// only fetch 10 minute old items
-				thresh := time.Now().Add(-10 * time.Minute)
+				thresh := time.Now().UTC().Add(-10 * time.Minute)
 				return !item.Featured && item.UploadedDate.After(thresh)
 			},
 			irc, freeleechLineFmt)

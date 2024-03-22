@@ -94,7 +94,7 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 
 		// Store fetched torrents temporarily for processing
 		announceDoc := PageItem{TorrentId: torrentId, Name: title, Size: size, Category: getCategoryFriendlyStr(categoryId),
-			Type: getTypeFriendlyStr(typeId), Uploader: uploader, URL: url, Featured: featured, RawLine: announceLine, CreatedDate: time.Now(),
+			Type: getTypeFriendlyStr(typeId), Uploader: uploader, URL: url, Featured: featured, RawLine: announceLine, CreatedDate: time.Now().UTC(),
 			UploadedDate: uploadTime}
 		if filter(announceDoc) {
 			fetchedTors = append(fetchedTors, announceDoc)
