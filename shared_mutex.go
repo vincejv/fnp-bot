@@ -41,6 +41,9 @@ var interruptWnR = new(ItemIdCtr)
 // interrupts PONG check and trickle
 var interruptWSPong = new(ItemIdCtr)
 
+// flag to check if fetching manually from API
+var isFetchingManually = new(ItemIdCtr)
+
 func initMutex() {
 	lastItemId.Set(-1)
 	lastFeatId.Set(-1)

@@ -131,13 +131,17 @@ func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 				log.Printf("could not parse websocket message: %v err: %v", payload, err)
 				break
 			}
-			announceType := p.determineType(unit3dBotName)
-			if announceType == UPLOAD_ANNOUNCE {
-				go processAnnounce(irc, lastItemId, p.parseAnnounce, formatAnnounceStr)
-			} else if announceType == FEATURE_ANNOUNCE {
-				go processAnnounce(irc, lastFeatId, p.parseSparseAnnounce, formatFeatureStr)
-			} else if announceType == FREELEECH_ANNOUNCE {
-				go processAnnounce(irc, lastFLId, p.parseSparseAnnounce, formatFreeleechStr)
+			if !isFetchingManually.IsFlagged() { // don't track and announce websocket data while fetching manually
+				announceType := p.determineType(unit3dBotName)
+				if announceType == UPLOAD_ANNOUNCE {
+					go processAnnounce(irc, lastItemId, p.parseAnnounce, formatAnnounceStr)
+				} else if announceType == FEATURE_ANNOUNCE {
+					go processAnnounce(irc, lastFeatId, p.parseSparseAnnounce, formatFeatureStr)
+				} else if announceType == FREELEECH_ANNOUNCE {
+					go processAnnounce(irc, lastFLId, p.parseSparseAnnounce, formatFreeleechStr)
+				}
+			} else {
+				log.Println("Skipping WS data ingest, already manually fetching something")
 			}
 		case *network.EventWebSocketFrameError:
 		case *network.EventWebSocketClosed:
@@ -169,32 +173,36 @@ func processAnnounce(irc *ircevent.Connection, itemId *ItemIdCtr, parserFn Parse
 
 // Checks for missed announce items
 func performManualFetch(irc *ircevent.Connection) {
-	log.Println("Checking for missed items")
-	// only fetch 10 minute old items
-	timeFilter := func(item PageItem) bool {
-		thresh := time.Now().UTC().Add(-10 * time.Minute)
-		return item.UploadedDate.After(thresh)
-	}
-	if lastItemId.Get() != -1 {
-		go fetchTorPage(cookieJar.Get(), "", lastItemId, timeFilter, irc, announceLineFmt)
+	if !isFetchingManually.IsFlagged() {
+		log.Println("Checking for missed items")
+		// only fetch 10 minute old items
+		timeFilter := func(item PageItem) bool {
+			thresh := time.Now().UTC().Add(-10 * time.Minute)
+			return item.UploadedDate.After(thresh)
+		}
+		if lastItemId.Get() != -1 {
+			go fetchTorPage(cookieJar.Get(), "", lastItemId, timeFilter, irc, announceLineFmt)
+		} else {
+			log.Println("No manual fetch for uploads necessary")
+		}
+		if lastFeatId.Get() != -1 {
+			go fetchTorPage(cookieJar.Get(), "&featured=true", lastFeatId, timeFilter, irc, featureLineFmt)
+		} else {
+			log.Println("No manual fetch for featuring items necessary")
+		}
+		if lastFLId.Get() != -1 {
+			go fetchTorPage(cookieJar.Get(), "&free[0]=100", lastFLId,
+				func(item PageItem) bool {
+					// only fetch 10 minute old items
+					thresh := time.Now().UTC().Add(-10 * time.Minute)
+					return !item.Featured && item.UploadedDate.After(thresh)
+				},
+				irc, freeleechLineFmt)
+		} else {
+			log.Println("No manual fetch for FL items necessary")
+		}
 	} else {
-		log.Println("No manual fetch for uploads necessary")
-	}
-	if lastFeatId.Get() != -1 {
-		go fetchTorPage(cookieJar.Get(), "&featured=true", lastFeatId, timeFilter, irc, featureLineFmt)
-	} else {
-		log.Println("No manual fetch for featuring items necessary")
-	}
-	if lastFLId.Get() != -1 {
-		go fetchTorPage(cookieJar.Get(), "&free[0]=100", lastFLId,
-			func(item PageItem) bool {
-				// only fetch 10 minute old items
-				thresh := time.Now().UTC().Add(-10 * time.Minute)
-				return !item.Featured && item.UploadedDate.After(thresh)
-			},
-			irc, freeleechLineFmt)
-	} else {
-		log.Println("No manual fetch for FL items necessary")
+		log.Println("Skipping manual fetch, already fetching something")
 	}
 }
 
