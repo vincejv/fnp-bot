@@ -165,11 +165,15 @@ func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 				log.Printf("could not parse websocket message: %v err: %v", payload, err)
 				break
 			}
-			if strings.Contains(payload, "new.message") { // only new message will be processed
-				announceType := p.determineType(unit3dBotName)
-				if announceType == USER_MESSAGE {
-					processAnnounce(irc, lastItemId, p.parseUserMessage, formatUserMsgStr) // process sequentially
+			if !isFetchingManually.IsFlagged() { // don't track and announce websocket data while fetching manually
+				if strings.Contains(payload, "new.message") { // only new message will be processed
+					announceType := p.determineType(unit3dBotName)
+					if announceType == USER_MESSAGE {
+						processAnnounce(irc, lastItemId, p.parseUserMessage, formatUserMsgStr) // process sequentially
+					}
 				}
+			} else {
+				log.Println("Skipping WS data ingest, already manually fetching something")
 			}
 		case *network.EventWebSocketFrameError:
 		case *network.EventWebSocketClosed:
@@ -206,16 +210,22 @@ func processAnnounce(irc *ircevent.Connection, itemId *ItemIdCtr, parserFn Parse
 
 // Checks for missed announce items
 func performManualFetch(irc *ircevent.Connection) {
-	log.Println("Checking for missed chats")
-	// only fetch 10 minute old items
-	timeFilter := func(item PageItem) bool {
-		thresh := time.Now().UTC().Add(-10 * time.Minute)
-		return item.CreatedAt.After(thresh)
-	}
-	if lastItemId.Get() != -1 {
-		fetchTorPage(cookieJar.Get(), "", lastItemId, timeFilter, irc, userLineFmt)
+	if !isFetchingManually.IsFlagged() {
+		isFetchingManually.Flag()
+		log.Println("Checking for missed chats")
+		// only fetch 10 minute old items
+		timeFilter := func(item PageItem) bool {
+			thresh := time.Now().UTC().Add(-10 * time.Minute)
+			return item.CreatedAt.After(thresh)
+		}
+		if lastItemId.Get() != -1 {
+			fetchTorPage(cookieJar.Get(), "", lastItemId, timeFilter, irc, userLineFmt)
+		} else {
+			log.Println("No manual fetch for chat necessary")
+		}
+		isFetchingManually.Reset()
 	} else {
-		log.Println("No manual fetch for chat necessary")
+		log.Println("Skipping manual fetch, already fetching something")
 	}
 }
 
