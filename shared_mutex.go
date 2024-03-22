@@ -17,12 +17,6 @@ type CookieJar struct {
 // Track last item fetched
 var lastItemId = new(ItemIdCtr)
 
-// Track last feature item fetched
-var lastFeatId = new(ItemIdCtr)
-
-// Track last freeleech item fetched
-var lastFLId = new(ItemIdCtr)
-
 // Store cookies from login
 var cookieJar = new(CookieJar)
 
@@ -43,8 +37,6 @@ var interruptWSPong = new(ItemIdCtr)
 
 func initMutex() {
 	lastItemId.Set(-1)
-	lastFeatId.Set(-1)
-	lastFLId.Set(-1)
 	pingPongWatchdog.Set(0)
 	refreshedPage.Set(0)
 }

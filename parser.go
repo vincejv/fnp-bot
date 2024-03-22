@@ -4,11 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
-	"io"
 	"log"
-	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -28,6 +25,7 @@ type ParserFunc func(string, string) *Announce
 
 type WebsocketMessage struct {
 	Message struct {
+		ID  int64 `json:"id"`
 		Bot struct {
 			Slug        string `json:"slug"`
 			Name        string `json:"name"`
@@ -166,58 +164,6 @@ func (m *WebsocketMessage) determineType(botname string) int {
 	return UPLOAD_ANNOUNCE
 }
 
-func (m *WebsocketMessage) parseUploader() string {
-
-	// uploader
-	var uploader string
-	anonUploader := strings.Contains(m.Message.Message, "An anonymous user has uploaded")
-	if anonUploader {
-		uploader = "anonymous"
-	} else {
-		// split string and grab idx [1]
-		//ul := strings.Split(*anMsg, "")
-		//uploader = ul[1]
-
-		uploaderRegex := regexp.MustCompile("<a[^>]+href=\\\"https?\\:\\/\\/[^\\/]+\\/users\\/\\w+\\\"[^>]*>(.*?)<\\/a>")
-		uploaderMatches := uploaderRegex.FindStringSubmatch(m.Message.Message)
-		uploader = uploaderMatches[1]
-	}
-
-	return uploader
-}
-
-func (m *WebsocketMessage) parseCategory() string {
-	category := ""
-
-	re := regexp.MustCompile(`(?mi)has uploaded a new (.*?)(\..* grab it now!)`)
-	matches := re.FindStringSubmatch(m.Message.Message)
-
-	if len(matches) >= 1 {
-		category = matches[1]
-	}
-
-	return category
-}
-
-func (m *WebsocketMessage) parseRelease() (url string, rel string) {
-	// url
-	// matches into two groups - url and torrent name
-	urlNameRegex := regexp.MustCompile("<a[^>]+href=\\\"(https?\\:\\/\\/[^\\/]+\\/torrents\\/\\d+)\\\"[^>]*>(.*?)<\\/a>")
-	matches := urlNameRegex.FindStringSubmatch(m.Message.Message)
-
-	url = matches[1]
-	rel = matches[2]
-
-	return
-}
-
-func (m *WebsocketMessage) parseTorrentId(url string) int {
-	urlRegx := regexp.MustCompile(`(https?\:\/\/.*?\/).*\/(\d+)`)
-	matches := urlRegx.FindStringSubmatch(url)
-	tId, _ := strconv.Atoi(matches[2])
-	return tId
-}
-
 func cleanHTML(input string) string {
 	// Unescape HTML entities
 	input = html.UnescapeString(input)
@@ -256,90 +202,9 @@ func extractAltText(imgTag string) string {
 func (m *WebsocketMessage) parseUserMessage(baseUrl, apiKey string) *Announce {
 	a := &Announce{}
 
+	a.Id = m.Message.ID
 	a.Uploader = m.Message.User.Username
 	a.RawLine = cleanHTML(m.Message.Message)
 
 	return a
-}
-
-// Parse regular announce, that contains uploader and categories in the announce message itself
-func (m *WebsocketMessage) parseAnnounce(baseUrl, apiKey string) *Announce {
-	a := &Announce{}
-
-	a.Uploader = m.parseUploader()
-	a.Category = m.parseCategory()
-
-	a.Url, a.Release = m.parseRelease()
-	tDtl := getTorrentDtl(baseUrl, apiKey, m.parseTorrentId(a.Url))
-	mapTorDtlToAnnounce(a, tDtl)
-
-	return a
-}
-
-// Parse feature/freeleech announce, that does not contain uploader and categories in the announce message itself
-func (m *WebsocketMessage) parseSparseAnnounce(baseUrl, apiKey string) *Announce {
-	a := &Announce{}
-
-	a.Url, a.Release = m.parseRelease()
-	tDtl := getTorrentDtl(baseUrl, apiKey, m.parseTorrentId(a.Url))
-	mapTorDtlToAnnounce(a, tDtl)
-	a.Category = tDtl.Attributes.Category
-	a.Uploader = tDtl.Attributes.Uploader
-
-	return a
-}
-
-// Maps item detail from API to the announce object
-func mapTorDtlToAnnounce(a *Announce, tDtl *TorrentDetail) {
-	a.Id, _ = strconv.ParseInt(tDtl.ID, 10, 64)
-	a.Size = byteCountIEC(int64(tDtl.Attributes.Size))
-	a.Type = tDtl.Attributes.Type
-	if tDtl.Attributes.DoubleUpload {
-		a.DoubleUpload = "Yes"
-	} else {
-		a.DoubleUpload = "No"
-	}
-	a.Freeleech = tDtl.Attributes.Freeleech
-	if tDtl.Attributes.Internal == 0 {
-		a.Internal = "No"
-	} else {
-		a.Internal = "Yes"
-	}
-}
-
-// Retrieves item detail from the API
-func getTorrentDtl(baseUrl, apiKey string, tid int) *TorrentDetail {
-	torDtl := new(TorrentDetail)
-	resp, err := http.Get(fmt.Sprintf("%s/api/torrents/%d?api_token=%s", baseUrl, tid, apiKey))
-	if err != nil {
-		log.Printf("Unable to fetch torrent %+v\n", tid)
-	}
-	// Read and unmarshal the response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("Unable to read response body %+v\n", err)
-		return nil
-	}
-	err = json.Unmarshal(body, &torDtl)
-	if err != nil {
-		log.Printf("Unable to unmarshall response %+v\n", err)
-		return nil
-	}
-	defer resp.Body.Close()
-	return torDtl
-}
-
-// Converts file size to human readable string
-func byteCountIEC(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.2f %ciB",
-		float64(b)/float64(div), "KMGTPE"[exp])
 }

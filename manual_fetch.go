@@ -118,6 +118,7 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 	// Examine fetched torrents and push to IRC based on last send item id
 	for _, tor := range filteredItems {
 		if tor.ID > lastId.Get() {
+			log.Printf("Processing: %d, LastId: %d\n", tor.ID, lastId.Get())
 			cleanLine := fmt.Sprintf(userLineFmt, tor.User.Username, cleanHTML(tor.Message))
 			log.Println("Missed chat: " + cleanLine)
 			irc.Privmsg(ircChannel, cleanLine) // send in order

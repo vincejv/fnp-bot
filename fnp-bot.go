@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"log"
 	"os"
@@ -27,7 +28,6 @@ var ircChannel = os.Getenv("IRC_CHANNEL")
 var ircPassword = os.Getenv("IRC_BOT_PASSWORD")
 
 // var ircDomainTrigger = os.Getenv("IRC_DOMAIN_TRIGGER") // Trigger for hello message and nickserv auth
-var fetchNoItems = getEnv("FETCH_NO_OF_ITEMS", "25") // For manual fetching
 var fetchSiteBaseUrl = getEnv("FETCH_BASE_URL", "https://site.com")
 var enableSSL = getEnv("ENABLE_SSL", "True")
 var enableSasl = getEnv("ENABLE_SASL", "False")
@@ -46,6 +46,10 @@ func main() {
 	log.Print("Starting FNP Chat bridge")
 	logSettings()
 	initMutex()
+
+	// Prepare SQLite Database
+	db := openDb()
+	defer db.Close()
 
 	// Prepare IRC Bot
 	irc := createIRCBot()
@@ -110,6 +114,23 @@ func waitAndReload(ctx context.Context, timeout int) {
 	go reloadChatPage(ctx, roomId, "WS not acknowledged, reloading page")
 }
 
+func openDb() *sql.DB {
+	db, err := sql.Open("sqlite3", "/config/announce.db")
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	sts := `CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, name TEXT, token TEXT);`
+	_, err = db.Exec(sts)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return db
+}
+
 // Start and create browser
 func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 	gotException := make(chan bool, 1)
@@ -121,7 +142,7 @@ func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 			if refreshedPage.IsFlagged() {
 				// paged refresh due to WS Closing
 				refreshedPage.Reset()
-				performManualFetch(irc)
+				go performManualFetch(irc)
 			} else {
 				log.Println("Intial WS connection created")
 			}
@@ -180,6 +201,7 @@ func processAnnounce(irc *ircevent.Connection, itemId *ItemIdCtr, parserFn Parse
 		irc.Privmsg(ircChannel, announceString)
 	}
 	itemId.Set(a.Id)
+	log.Printf("Processing: %d, LastId: %d\n", a.Id, itemId.Get())
 }
 
 // Checks for missed announce items

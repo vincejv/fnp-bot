@@ -9,7 +9,6 @@ require (
 )
 
 require (
-	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/chromedp/sysutil v1.0.0 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
@@ -18,11 +17,9 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/stretchr/testify v1.9.0 // indirect
-	golang.org/x/net v0.21.0 // indirect
 )
 
 require (
-	github.com/PuerkitoBio/goquery v1.9.1
 	github.com/ergochat/irc-go v0.4.0
 	github.com/pquerna/otp v1.4.0
 	golang.org/x/sys v0.17.0 // indirect
