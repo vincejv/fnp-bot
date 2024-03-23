@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -204,7 +205,7 @@ func (m *WebsocketMessage) parseRelease() (url string, rel string) {
 	matches := urlNameRegex.FindStringSubmatch(m.Message.Message)
 
 	url = matches[1]
-	rel = matches[2]
+	rel = html.UnescapeString(matches[2])
 
 	return
 }
