@@ -32,7 +32,7 @@ type FetchFilter func(PageItem) bool
 // Manual fetch for fetching missed items when websocket is temporarily dropped or disconnected
 func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilter, irc *ircevent.Connection, announceFmt string) {
 	// Request the HTML page.
-	time.Sleep(5 * time.Second) // artificially sleep by 5 seconds
+	time.Sleep(15 * time.Second) // artificially sleep by 5 seconds
 	url := fmt.Sprintf("%s/torrents?perPage=%s%s", fetchSiteBaseUrl, fetchNoItems, addtlQuery)
 	log.Println("Fetching possible missed items due to WS Closing")
 	log.Println(url)
@@ -50,7 +50,7 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
 		log.Printf("Http error: %d, retrying\n", res.StatusCode)
-		time.Sleep(5 * time.Second)
+		time.Sleep(10 * time.Second)
 		fetchTorPage(cookie, addtlQuery, lastId, filter, irc, announceFmt)
 		return
 	}
@@ -62,6 +62,7 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 	}
 
 	var fetchedTors []PageItem
+	var filteredIds []int64
 
 	// Scrape the items
 	doc.Find("body > main > article > div > section.panelV2.torrent-search__results > div > table > tbody > tr").Each(func(i int, s *goquery.Selection) {
@@ -99,15 +100,17 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 		if filter(announceDoc) {
 			fetchedTors = append(fetchedTors, announceDoc)
 		} else {
-			log.Println("Not announcing, item doesn't pass filter: " + announceDoc.RawLine)
+			filteredIds = append(filteredIds, announceDoc.TorrentId)
 		}
 	})
+	log.Printf("Not announcing, items doesn't pass filter: %v\n", filteredIds)
 
 	// Must sort in ascending so next block will work correctly
 	sort.Slice(fetchedTors, func(tori, torj int) bool {
 		return fetchedTors[tori].TorrentId < fetchedTors[torj].TorrentId
 	})
 
+	var skippedIds []int64
 	// Examine fetched torrents and push to IRC based on last send item id
 	for _, tor := range fetchedTors {
 		if tor.TorrentId > lastId.Get() {
@@ -115,9 +118,10 @@ func fetchTorPage(cookie, addtlQuery string, lastId *ItemIdCtr, filter FetchFilt
 			go irc.Privmsg(ircChannel, tor.RawLine)
 			lastId.Set(tor.TorrentId)
 		} else {
-			log.Println("Not announcing, item already announced: " + tor.RawLine)
+			skippedIds = append(skippedIds, tor.TorrentId)
 		}
 	}
+	log.Printf("Not announcing, item already announced: %v", skippedIds)
 }
 
 func getCategoryFriendlyStr(catId int) string {
