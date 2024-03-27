@@ -131,17 +131,13 @@ func startBrowser(ctx context.Context, irc *ircevent.Connection) {
 				log.Printf("could not parse websocket message: %v err: %v", payload, err)
 				break
 			}
-			if !isFetchingManually.IsFlagged() { // don't track and announce websocket data while fetching manually
-				announceType := p.determineType(unit3dBotName)
-				if announceType == UPLOAD_ANNOUNCE {
-					go processAnnounce(irc, lastItemId, p.parseAnnounce, formatAnnounceStr)
-				} else if announceType == FEATURE_ANNOUNCE {
-					go processAnnounce(irc, lastFeatId, p.parseSparseAnnounce, formatFeatureStr)
-				} else if announceType == FREELEECH_ANNOUNCE {
-					go processAnnounce(irc, lastFLId, p.parseSparseAnnounce, formatFreeleechStr)
-				}
-			} else {
-				log.Println("Skipping WS data ingest, already manually fetching something")
+			announceType := p.determineType(unit3dBotName)
+			if announceType == UPLOAD_ANNOUNCE {
+				go processAnnounce(irc, lastItemId, p.parseAnnounce, formatAnnounceStr)
+			} else if announceType == FEATURE_ANNOUNCE {
+				go processAnnounce(irc, lastFeatId, p.parseSparseAnnounce, formatFeatureStr)
+			} else if announceType == FREELEECH_ANNOUNCE {
+				go processAnnounce(irc, lastFLId, p.parseSparseAnnounce, formatFreeleechStr)
 			}
 		case *network.EventWebSocketFrameError:
 		case *network.EventWebSocketClosed:
